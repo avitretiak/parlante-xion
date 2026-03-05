@@ -155,6 +155,12 @@ export class ParlantePlayer {
     await this.setVoiceStatus(client, '');
   }
 
+  destroy(): void {
+    this.clearPending();
+    this.cancelIdleTimer();
+    this.stopRefreshInterval();
+  }
+
   private clearPending(): void {
     this.pending = null;
     if (this.debounceTimer) {

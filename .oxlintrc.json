@@ -1,0 +1,9 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript"],
+  "rules": {
+    "typescript/ban-types": "off",
+    "typescript/no-non-null-assertion": "off"
+  },
+  "ignorePatterns": ["node_modules/", "dist/", "nodelink-repo/"]
+}

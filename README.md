@@ -57,7 +57,7 @@ docker compose up
 | `/fseek <seconds>`   | Seek forward/backward          |
 | `/queue`             | Show queue                     |
 | `/skip`              | Skip current track             |
-| `/next <position>`   | Skip to position in queue      |
+| `/next`              | Skip to next track             |
 | `/unskip`            | Play previous track            |
 | `/shuffle`           | Shuffle queue                  |
 | `/remove <position>` | Remove track from queue        |
@@ -65,13 +65,14 @@ docker compose up
 | `/clear`             | Clear queue                    |
 | `/loop`              | Toggle track loop              |
 | `/loop-queue`        | Toggle queue loop              |
-| `/volume <level>`    | Set volume (0–100)             |
+| `/volume <level>`    | Set volume (0-100)             |
 | `/now-playing`       | Show current track             |
-| `/player-controls`   | Interactive player buttons     |
 | `/config`            | Configure bot settings         |
 | `/cleanup`           | Delete bot messages in channel |
 | `/disconnect`        | Disconnect from voice          |
 | `/favorites`         | Manage favorite queries        |
+
+See [`docs/COMMANDS.md`](docs/COMMANDS.md) for detailed command reference with options, flows, and permissions.
 
 ## Development
 
@@ -80,8 +81,8 @@ bun install
 bun run dev          # start bot (NodeLink must be running)
 bun run typecheck    # type check
 bun test             # run tests
-bun run lint         # lint
-bun run format       # format
+bun run lint         # lint (oxlint)
+bun run format       # format (oxfmt)
 ```
 
 ## License

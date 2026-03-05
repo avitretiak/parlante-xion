@@ -65,7 +65,7 @@ export default class PlayerControlsCommand extends ComponentCommand {
           });
           return;
         }
-        kPlayer.skip();
+        await kPlayer.skip();
         break;
       }
       case 'player_stop': {

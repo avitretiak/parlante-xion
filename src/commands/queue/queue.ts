@@ -61,7 +61,7 @@ export default class QueueCommand extends Command {
         : messages.error.nothingPlaying,
       fields: upcomingTracks.map((track, i) => ({
         name: `${startIndex + i + 1}. ${track.title}`,
-        value: track.author ?? 'Unknown Artist',
+        value: track.author ?? messages.player.unknownArtist,
         inline: false,
       })),
       footer: {

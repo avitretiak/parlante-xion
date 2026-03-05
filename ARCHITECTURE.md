@@ -7,6 +7,8 @@
 - **Audio**: Kazagumo → Shoukaku → NodeLink (Lavalink-compatible)
 - **Database**: Drizzle ORM + Bun SQLite
 - **Logging**: LogTape with pretty formatter
+- **Linting**: oxlint (`.oxlintrc.json`)
+- **Formatting**: oxfmt (`.oxfmtrc.json`)
 - **Languages**: English (`en`), Spanish (`es-UY`)
 
 ## System Overview
@@ -16,13 +18,19 @@ Discord Gateway
     ↓
 Seyfert Client (src/index.ts)
     ↓
-Middlewares: voiceGuard → commandQueue
+Middlewares: commandQueue → voiceGuard
     ↓
 Command Handlers (src/commands/)
     ↓
-Kazagumo ← Shoukaku ← NodeLink ← YouTube/Spotify/SoundCloud
+Services (search, queue, config)
     ↓
-ParlantePlayer (src/structures/player.ts)
+Kazagumo → Shoukaku → NodeLink → YouTube/Spotify/SoundCloud
+    ↓
+Kazagumo Events
+    ↓
+PlayersManager → ParlantePlayer (per-guild state)
+    ↓
+Seyfert REST (messages, voice status) → Discord
     ↓
 SQLite via Drizzle (settings, cache, favorites)
 ```
@@ -38,7 +46,9 @@ SQLite via Drizzle (settings, cache, favorites)
 | `migrate`           | Run Drizzle migrations only |
 | `migrate-and-start` | Migrate then start (Docker) |
 
-Seyfert's built-in logger is routed through LogTape. Global `unhandledRejection` handler prevents crashes.
+Startup sequence: create data directory → `initKazagumo(client)` → register middlewares (voiceGuard, commandQueue) → `client.start()`.
+
+Seyfert's built-in logger is routed through LogTape. Global `unhandledRejection` handler prevents crashes. Error handlers registered for `onRunError`, `onPermissionsFail`, `onBotPermissionsFail`, `onOptionsError`, `onMiddlewaresError`.
 
 ## Commands (`src/commands/`)
 
@@ -54,27 +64,29 @@ commands/
 └── queue/       # queue, skip, next, unskip, shuffle, remove, move, clear
 ```
 
-All playback/queue commands use `@Middlewares(['voiceGuard', 'commandQueue'])`.
+All playback/queue commands use `@Middlewares(['commandQueue', 'voiceGuard'])`. See `docs/COMMANDS.md` for the full command reference with options, flows, and permissions.
 
 ## Middlewares (`src/middlewares/`)
 
 ### `voiceGuard`
 
-Validates user is in a voice channel (and same channel as bot if bot is connected). Calls `stop(errorMessage)` on failure — `onMiddlewaresError` in `src/index.ts` displays the error to the user.
+Validates the user is in a voice channel (and same channel as bot if bot is connected). Calls `stop(errorMessage)` on failure — `onMiddlewaresError` in `src/index.ts` displays the error to the user. Never defers or writes directly.
 
 ### `commandQueue`
 
-Serializes command execution per guild using a promise chain. Prevents race conditions when multiple commands arrive simultaneously.
+Serializes command execution per guild using a promise chain (`Map<guildId, Promise>`). Prevents race conditions when multiple commands arrive simultaneously. Transparent to commands — no error handling, just ordering.
 
 ## Audio Pipeline
 
 ### Kazagumo Setup (`src/structures/kazagumo.ts`)
 
-Initializes Kazagumo with Seyfert connector. Registers event handlers:
+Initializes Kazagumo with Seyfert connector. Connects to NodeLink using `NODELINK_URL` and `NODELINK_PASSWORD`. Shoukaku options: moveOnDisconnect, no resume, 3 reconnect retries.
 
-- `playerStart` — sets voice channel status, sends now-playing embed
-- `playerEmpty` — sends queue-ended message, starts idle disconnect timer
-- `playerDestroy` — cleans up voice status, deletes now-playing message
+Registers event handlers:
+
+- `playerStart` — cancels idle timer, sets voice channel status, sends/updates now-playing embed, starts 5s refresh interval
+- `playerEmpty` — stops refresh, sends queue-ended message, clears voice status, starts idle disconnect timer (guild-configurable wait)
+- `playerDestroy` — stops all timers, clears voice status, deletes now-playing message, removes from PlayersManager
 - `playerException` / `playerResolveError` — debug logging
 
 All async event handlers are wrapped in try/catch to prevent unhandled rejections.
@@ -83,14 +95,15 @@ All async event handlers are wrapped in try/catch to prevent unhandled rejection
 
 Per-guild player state wrapper around `KazagumoPlayer`. Manages:
 
-- Now-playing embeds (debounced updates, auto-replace after 45min)
+- Now-playing embeds (debounced 5s updates, auto-replace after 45min, edit failure cooldown 15s)
 - Voice channel status text
-- Idle disconnect timer
+- Idle disconnect timer (guild-configurable, default 30s)
 - Periodic embed refresh (5s interval during playback)
+- `destroy()` method clears all timers (debounceTimer, idleTimer, refreshInterval) and pending updates
 
 ### PlayersManager (`src/managers/players.ts`)
 
-Simple `Map<guildId, ParlantePlayer>` with get/set/delete.
+`Map<guildId, ParlantePlayer>` with get/create/delete. `create()` reuses existing player if present (updates textChannelId). `delete()` calls `player.destroy()` before removing from the map.
 
 ### TTS
 
@@ -98,7 +111,7 @@ Simple `Map<guildId, ParlantePlayer>` with get/set/delete.
 
 ## Database
 
-Bun SQLite with Drizzle ORM. Migrations committed in `drizzle/` and run on startup via `drizzle-orm/bun-sqlite/migrator`.
+Bun SQLite with Drizzle ORM. WAL mode + NORMAL synchronous for performance. Database path: `DATA_DIR/bot.db`. Migrations committed in `drizzle/` and run on startup via `drizzle-orm/bun-sqlite/migrator`.
 
 ### Tables
 
@@ -107,6 +120,8 @@ Bun SQLite with Drizzle ORM. Migrations committed in `drizzle/` and run on start
 | KeyValueCache | TTL cache (autocomplete, metadata) | `key` (text PK)     |
 | Setting       | Per-guild config                   | `guildId` (text PK) |
 | FavoriteQuery | Saved search queries per guild     | `id` (auto-inc PK)  |
+
+Setting defaults: playlistLimit=50, secondsToWaitAfterQueueEmpties=30, defaultVolume=100, defaultQueuePageSize=10.
 
 ## Events (`src/events/`)
 
@@ -120,16 +135,20 @@ Bun SQLite with Drizzle ORM. Migrations committed in `drizzle/` and run on start
 
 | Service              | Purpose                                           |
 | -------------------- | ------------------------------------------------- |
-| `config.ts`          | Loads env vars (`DATA_DIR`, `DISCORD_TOKEN`, etc) |
-| `search.ts`          | `searchTracks()` via Kazagumo                     |
-| `queue-service.ts`   | Queue operations (add, manage tracks)             |
+| `config.ts`          | Loads env vars (`DATA_DIR`)                       |
+| `search.ts`          | `searchTracks()` via Kazagumo with error handling |
+| `queue-service.ts`   | Queue operations (add with front/shuffle options) |
 | `key-value-cache.ts` | TTL cache backed by KeyValueCache table           |
+
+## Error Classes (`src/utils/error/errors.ts`)
+
+Defines error hierarchy: `AppError` (base), `PlayerError`, `ValidationError`, `ConfigurationError`, `ServiceError`, `NetworkError`. No helper functions — class definitions only.
 
 ## Infrastructure
 
 ### Docker
 
-2-stage Dockerfile (deps + runtime) on `oven/bun:1-alpine`. Three services in compose:
+2-stage Dockerfile (deps + runtime) on `oven/bun:1-alpine`. Runs as non-root `parlante` user. Healthcheck: `kill -0 1`. Three services in compose:
 
 - `parlante-xion` — the bot
 - `nodelink` — `performanc/nodelink:latest`
@@ -141,4 +160,4 @@ GitHub Actions on push to `main` — builds and pushes bot image to GHCR (multi-
 
 ## Import Aliases
 
-All internal imports use `#parlante/*` subpath imports defined in `package.json` `"imports"` field. Example: `#parlante/utils/system/logger`, `#parlante/db/schema`.
+All internal imports use `#parlante/*` subpath imports defined in both `package.json` `"imports"` and `tsconfig.json` `"paths"`. Example: `#parlante/utils/system/logger`, `#parlante/db/schema`.

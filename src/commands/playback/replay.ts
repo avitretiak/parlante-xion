@@ -26,7 +26,7 @@ export default class ReplayCommand extends Command {
       return;
     }
 
-    kPlayer.seek(0);
+    await kPlayer.seek(0);
     await ctx.write({ content: messages.player.replayed, flags: MessageFlags.Ephemeral });
   }
 }

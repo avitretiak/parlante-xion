@@ -61,7 +61,7 @@ const useOptions = {
   description: messages.favorites.use.description,
 })
 @Options(useOptions)
-@Middlewares(['commandQueue'])
+@Middlewares(['commandQueue', 'voiceGuard'])
 class UseFavoriteCommand extends SubCommand {
   async onAutocomplete(interaction: AutocompleteInteraction) {
     await useOptions.name.autocomplete!(interaction);

@@ -60,10 +60,7 @@
       "indexes": {
         "uniqueGuildName": {
           "name": "uniqueGuildName",
-          "columns": [
-            "guildId",
-            "name"
-          ],
+          "columns": ["guildId", "name"],
           "isUnique": true
         }
       },

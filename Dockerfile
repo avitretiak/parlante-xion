@@ -15,7 +15,9 @@ ARG COMMIT_HASH
 ARG VERSION
 ARG GITHUB_REPOSITORY
 
-RUN apk add --no-cache sqlite-libs
+RUN apk add --no-cache sqlite-libs \
+  && addgroup -S parlante \
+  && adduser -S parlante -G parlante
 
 LABEL org.opencontainers.image.title="parlante-xion"
 LABEL org.opencontainers.image.description="A self-hosted Discord music bot"
@@ -38,7 +40,10 @@ ENV BUILD_DATE=${BUILD_DATE}
 ENV COMMIT_HASH=${COMMIT_HASH}
 ENV VERSION=${VERSION}
 
+RUN mkdir -p /data && chown parlante:parlante /data
+USER parlante
+
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD bun --version || exit 1
+  CMD kill -0 1 || exit 1
 
 CMD ["bun", "run", "src/index.ts", "migrate-and-start"]

@@ -112,10 +112,18 @@ export function initKazagumo(client: Client): Kazagumo {
     }
   });
   kazagumo.on('playerException', (player, data) => {
-    debug(`[${player.guildId}] Player exception`, data);
+    try {
+      debug(`[${player.guildId}] Player exception`, data);
+    } catch (err) {
+      debug(`[${player.guildId}] Error in playerException handler`, err);
+    }
   });
   kazagumo.on('playerResolveError', (player, track, message) => {
-    debug(`[${player.guildId}] Resolve error for ${track?.title ?? 'unknown track'}`, message);
+    try {
+      debug(`[${player.guildId}] Resolve error for ${track?.title ?? 'unknown track'}`, message);
+    } catch (err) {
+      debug(`[${player.guildId}] Error in playerResolveError handler`, err);
+    }
   });
 
   client.kazagumo = kazagumo;

@@ -9,7 +9,7 @@ import {
 import { MessageFlags } from 'seyfert/lib/types/payloads/channel';
 import { LoadType } from 'shoukaku';
 import messages from '#parlante/utils/constants/messages';
-import { buildNodeConfig } from '../../structures/kazagumo';
+import { buildNodeConfig } from '#parlante/structures/kazagumo';
 import { debug, warn } from '#parlante/utils/system/logger';
 
 const TTS_VOICE = 'Mateo';
@@ -73,17 +73,27 @@ export default class TtsCommand extends Command {
     const { baseUrl, auth } = buildNodeLinkRestUrl();
     const mixUrl = `${baseUrl}/v4/sessions/${node.sessionId}/players/${guildId}/mix`;
 
-    const response = await fetch(mixUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: auth,
-      },
-      body: JSON.stringify({
-        track: { encoded: result.data.encoded },
-        volume: TTS_MIX_VOLUME,
-      }),
-    });
+    let response: Response;
+    try {
+      response = await fetch(mixUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: auth,
+        },
+        body: JSON.stringify({
+          track: { encoded: result.data.encoded },
+          volume: TTS_MIX_VOLUME,
+        }),
+      });
+    } catch (err) {
+      warn(`[${guildId}] NodeLink mixer request failed`, err);
+      await ctx.editOrReply({
+        content: messages.error.commandFailed,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
 
     if (!response.ok) {
       warn(`[${guildId}] NodeLink mixer returned ${response.status}`);

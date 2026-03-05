@@ -88,6 +88,7 @@ export default {
     resumed: 'Playback resumed.',
     endedTitle: 'Song Ended',
     ended: 'Song ended',
+    unknownArtist: 'Unknown Artist',
   },
   favorites: {
     created: 'Favorite created.',

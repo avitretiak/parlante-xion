@@ -90,6 +90,7 @@ export default {
     resumed: '▶️ Reproducción reanudada.',
     endedTitle: 'Canción Finalizada',
     ended: 'Canción finalizada',
+    unknownArtist: 'Artista desconocido',
   },
   favorites: {
     created: '⭐ Favorito creado.',

@@ -20,6 +20,10 @@ class PlayersManager {
   }
 
   delete(guildId: string): void {
+    const player = this.players.get(guildId);
+    if (player) {
+      player.destroy();
+    }
     this.players.delete(guildId);
   }
 }
