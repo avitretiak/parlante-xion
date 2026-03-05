@@ -1,0 +1,68 @@
+import { eq } from 'drizzle-orm';
+import { db } from '#parlante/db';
+import { setting } from '#parlante/db/schema';
+
+async function createGuildSettings(guildId: string): Promise<Setting> {
+  const existing = await db
+    .select()
+    .from(setting)
+    .where(eq(setting.guildId, guildId))
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (existing) {
+    return existing;
+  }
+
+  const [newSetting] = await db.insert(setting).values({ guildId }).returning();
+
+  return newSetting!;
+}
+
+interface CachedSettings {
+  settings: Setting;
+  expiresAt: number;
+}
+
+const settingsCache = new Map<string, CachedSettings>();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const MAX_CACHE_SIZE = 500; // Maximum number of cached guild settings
+
+export async function getGuildSettings(guildId: string): Promise<Setting> {
+  const cached = settingsCache.get(guildId);
+  const now = Date.now();
+
+  if (cached && now < cached.expiresAt) {
+    return cached.settings;
+  }
+
+  const config = await db
+    .select()
+    .from(setting)
+    .where(eq(setting.guildId, guildId))
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+  const settings = config || (await createGuildSettings(guildId));
+
+  // Evict oldest entry if cache exceeds max size
+  if (settingsCache.size >= MAX_CACHE_SIZE) {
+    const firstKey = settingsCache.keys().next().value;
+    if (firstKey) {
+      settingsCache.delete(firstKey);
+    }
+  }
+
+  settingsCache.set(guildId, {
+    settings,
+    expiresAt: now + CACHE_TTL,
+  });
+
+  return settings;
+}
+
+/**
+ * Invalidate cached guild settings. Call this when settings are updated.
+ */
+export function invalidateGuildSettingsCache(guildId: string): void {
+  settingsCache.delete(guildId);
+}

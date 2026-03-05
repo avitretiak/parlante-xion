@@ -1,0 +1,4 @@
+[formatter]
+singleQuote = true
+indentStyle = "space"
+tabWidth = 2

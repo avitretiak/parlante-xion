@@ -1,0 +1,83 @@
+{
+  "name": "parlante-xion",
+  "version": "1.0.0",
+  "description": "🎧 a self-hosted Discord music bot that doesn't suck, using NodeLink as audio server",
+  "repository": "git@github.com:avitretiak/parlante-xion.git",
+  "author": "Avi Tretiak <avi@babi.uy>",
+  "license": "MIT",
+  "target": "bun",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "dev": "bun run src/index.ts",
+    "migrate-and-start": "bun run src/index.ts",
+    "lint": "bunx oxlint .",
+    "lint:fix": "bunx oxlint --fix .",
+    "format": "bunx prettier --write .",
+    "format:check": "bunx prettier --check .",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.10",
+    "@types/debug": "^4.1.12",
+    "@types/fs-capacitor": "^8.0.2",
+    "@types/node": "^25.3.3",
+    "drizzle-kit": "^0.31.9",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.3.2",
+    "oxlint": "^1.51.0",
+    "prettier": "^3.8.1",
+    "type-fest": "^5.4.4",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.17.0",
+    "@logtape/logtape": "^2.0.4",
+    "@logtape/pretty": "^2.0.4",
+    "drizzle-orm": "^0.45.1",
+    "kazagumo": "^3.4.1",
+    "seyfert": "^4.2.0",
+    "shoukaku": "^4.3.0"
+  },
+  "lint-staged": {
+    "*.{ts,js,json}": [
+      "bunx oxlint --fix",
+      "bunx prettier --write"
+    ]
+  },
+  "imports": {
+    "#parlante/bot": "./src/bot.ts",
+    "#parlante/commands": "./src/commands/index.ts",
+    "#parlante/config": "./src/services/config.ts",
+    "#parlante/db": "./src/db/index.ts",
+    "#parlante/db/schema": "./src/db/schema.ts",
+    "#parlante/managers/players": "./src/managers/players.ts",
+    "#parlante/services/queue-service": "./src/services/queue-service.ts",
+    "#parlante/services/search": "./src/services/search.ts",
+    "#parlante/types": "./src/types/index.ts",
+    "#parlante/types/commands": "./src/types/commands.ts",
+    "#parlante/types/db": "./src/types/db.ts",
+    "#parlante/types/player": "./src/types/player.ts",
+    "#parlante/types/services": "./src/types/services.ts",
+    "#parlante/utils/config/create-database-url": "./src/utils/config/create-database-url.ts",
+    "#parlante/utils/config/get-guild-settings": "./src/utils/config/get-guild-settings.ts",
+    "#parlante/utils/constants/constants": "./src/utils/constants/constants.ts",
+    "#parlante/utils/constants/messages": "./src/utils/constants/messages.ts",
+    "#parlante/utils/discord/build-embed": "./src/utils/discord/build-embed.ts",
+    "#parlante/utils/discord/channels": "./src/utils/discord/channels.ts",
+    "#parlante/utils/discord/register-commands-on-guild": "./src/utils/discord/register-commands-on-guild.ts",
+    "#parlante/utils/error/error-handlers": "./src/utils/error/error-handlers.ts",
+    "#parlante/utils/error/errors": "./src/utils/error/errors.ts",
+    "#parlante/utils/general/arrays": "./src/utils/general/arrays.ts",
+    "#parlante/utils/general/string": "./src/utils/general/string.ts",
+    "#parlante/utils/general/time": "./src/utils/general/time.ts",
+    "#parlante/utils/general/url": "./src/utils/general/url.ts",
+    "#parlante/utils/player/build-now-playing-embed": "./src/utils/player/build-now-playing-embed.ts",
+    "#parlante/utils/player/get-nodelink-autocomplete": "./src/utils/player/get-nodelink-autocomplete.ts",
+    "#parlante/utils/player/get-progress-bar": "./src/utils/player/get-progress-bar.ts",
+    "#parlante/utils/system/command-queue": "./src/utils/system/command-queue.ts",
+    "#parlante/utils/system/debug": "./src/utils/system/logger.ts",
+    "#parlante/utils/system/logger": "./src/utils/system/logger.ts",
+    "#parlante/utils/system/log-banner": "./src/utils/system/log-banner.ts"
+  }
+}

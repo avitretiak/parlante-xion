@@ -1,0 +1,56 @@
+services:
+  nodelink:
+    container_name: nodelink
+    image: performanc/nodelink:latest
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      - NODELINK_SERVER_PASSWORD=${NODELINK_PASSWORD}
+      - NODELINK_SOURCES_SPOTIFY_CLIENTID=${SPOTIFY_CLIENT_ID}
+      - NODELINK_SOURCES_SPOTIFY_CLIENTSECRET=${SPOTIFY_CLIENT_SECRET}
+      - NODELINK_SOURCES_YOUTUBE_CIPHER_URL=http://youtube-cipher:8081
+      - NODELINK_SOURCES_YOUTUBE_CIPHER_TOKEN=${YOUTUBE_CIPHER_TOKEN}
+    volumes:
+      - nodelink-data:/data
+    networks:
+      - parlante-network
+    depends_on:
+      youtube-cipher:
+        condition: service_started
+
+  youtube-cipher:
+    container_name: youtube-cipher
+    image: ghcr.io/kikkia/yt-cipher:master
+    restart: unless-stopped
+    networks:
+      - parlante-network
+    environment:
+      - PORT=8081
+      - HOST=0.0.0.0
+
+  parlante-xion:
+    container_name: parlante-xion
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/data
+      - NODELINK_URL=http://nodelink:3000
+    volumes:
+      - parlante-xion:/data
+    networks:
+      - parlante-network
+    depends_on:
+      nodelink:
+        condition: service_started
+
+volumes:
+  parlante-xion:
+  nodelink-data:
+
+networks:
+  parlante-network:
+    driver: bridge
