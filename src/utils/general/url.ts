@@ -1,17 +1,22 @@
 export const cleanUrl = (url: string) => {
   try {
-    // Clean URL
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
     const isYouTubeHost =
       host === 'youtube.com' || host === 'youtu.be' || host.endsWith('.youtube.com');
 
-    // Only process YouTube URLs
     if (!isYouTubeHost) {
       return url;
     }
 
-    // Keep essential parameters, remove playlist-related ones
+    // Explicit playlist links (/playlist?list=xxx) should be left untouched
+    const isExplicitPlaylist = u.pathname === '/playlist';
+    if (isExplicitPlaylist) {
+      return url;
+    }
+
+    // For single-video URLs (/watch?v=xxx&list=yyy or youtu.be/xxx?list=yyy),
+    // strip playlist-related params so the resolver treats them as a single track.
     const paramsToRemove = [
       'list',
       'index',
@@ -22,10 +27,9 @@ export const cleanUrl = (url: string) => {
       'si', // sharing identifier
     ];
 
-    // Remove unwanted parameters
-    paramsToRemove.forEach((param) => {
+    for (const param of paramsToRemove) {
       u.searchParams.delete(param);
-    });
+    }
 
     return u.toString();
   } catch {

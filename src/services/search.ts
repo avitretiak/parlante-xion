@@ -1,5 +1,6 @@
 import { Kazagumo } from 'kazagumo';
 import type { KazagumoSearchResult } from 'kazagumo';
+import { cleanUrl } from '#parlante/utils/general/url';
 
 export async function searchTracks(
   kazagumo: Kazagumo,
@@ -7,7 +8,7 @@ export async function searchTracks(
   guildId?: string,
 ): Promise<KazagumoSearchResult> {
   try {
-    return await kazagumo.search(query, {
+    return await kazagumo.search(cleanUrl(query), {
       requester: guildId ?? 'unknown',
     });
   } catch (error) {
