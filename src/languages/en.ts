@@ -88,6 +88,7 @@ export default {
     resumed: 'Playback resumed.',
     endedTitle: 'Song Ended',
     ended: 'Song ended',
+    trackLoadFailed: (title: string) => `⚠️ Could not load **${title}** — skipping.`,
     unknownArtist: 'Unknown Artist',
   },
   favorites: {

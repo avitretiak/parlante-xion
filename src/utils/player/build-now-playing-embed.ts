@@ -28,7 +28,7 @@ const getPlayerUI = (kPlayer: KazagumoPlayer): string => {
   const length = current.length ?? 0;
   const isStream = current.isStream;
 
-  const statusEmoji = kPlayer.paused ? '▶️' : '⏸️';
+  const statusEmoji = kPlayer.paused ? '⏸️' : '▶️';
 
   const progress = length > 0 && !isStream ? position / length : 0;
   const progressBar = getProgressBar(20, progress);

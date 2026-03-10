@@ -117,14 +117,53 @@ export function initKazagumo(client: Client): Kazagumo {
   });
   kazagumo.on('playerException', (player, data) => {
     try {
-      debug(`[${player.guildId}] Player exception`, data);
+      const reason =
+        data && typeof data === 'object' && 'exception' in data
+          ? (data as { exception?: { message?: string } }).exception?.message
+          : undefined;
+      warn(`[${player.guildId}] Player exception`, data);
+
+      const parlantePlayer = playersManager.get(player.guildId);
+      if (parlantePlayer) {
+        const current = player.queue.current;
+        const title =
+          (current as { title?: string } | null)?.title ??
+          (current as { info?: { title?: string } } | null)?.info?.title;
+        parlantePlayer.sendAutoDeleteMessage(
+          typedClient,
+          messages.player.trackLoadFailed(title ?? reason ?? 'Unknown Track'),
+        );
+      }
     } catch (err) {
       debug(`[${player.guildId}] Error in playerException handler`, err);
     }
   });
+  kazagumo.on('playerStuck', (player) => {
+    try {
+      warn(`[${player.guildId}] Player stuck`);
+
+      const parlantePlayer = playersManager.get(player.guildId);
+      if (parlantePlayer) {
+        const current = player.queue.current;
+        const title = (current as { title?: string } | null)?.title ?? 'Unknown Track';
+        parlantePlayer.sendAutoDeleteMessage(typedClient, messages.player.trackLoadFailed(title));
+      }
+    } catch (err) {
+      debug(`[${player.guildId}] Error in playerStuck handler`, err);
+    }
+  });
   kazagumo.on('playerResolveError', (player, track, message) => {
     try {
-      debug(`[${player.guildId}] Resolve error for ${track?.title ?? 'unknown track'}`, message);
+      const title =
+        (track as { title?: string }).title ??
+        (track as { info?: { title?: string } }).info?.title ??
+        'Unknown Track';
+      warn(`[${player.guildId}] Resolve error for ${title}`, message);
+
+      const parlantePlayer = playersManager.get(player.guildId);
+      if (parlantePlayer) {
+        parlantePlayer.sendAutoDeleteMessage(typedClient, messages.player.trackLoadFailed(title));
+      }
     } catch (err) {
       debug(`[${player.guildId}] Error in playerResolveError handler`, err);
     }

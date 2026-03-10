@@ -8,6 +8,7 @@ import { debug } from '#parlante/utils/system/logger';
 const EMBED_DEBOUNCE_MS = 5000;
 const MESSAGE_REPLACEMENT_THRESHOLD_MS = 45 * 60 * 1000; // 45 minutes
 const EDIT_FAILURE_COOLDOWN_MS = 15_000; // 15 seconds
+const AUTO_DELETE_DELAY_MS = 10_000; // 10 seconds
 
 type Embed = {
   color?: number;
@@ -153,6 +154,21 @@ export class ParlantePlayer {
 
   async clearVoiceStatus(client: UsingClient): Promise<void> {
     await this.setVoiceStatus(client, '');
+  }
+
+  sendAutoDeleteMessage(client: UsingClient, content: string): void {
+    const channelId = this.textChannelId;
+    client.messages
+      .write(channelId, { content })
+      .then((message) => {
+        if (message && 'id' in message) {
+          const messageId = message.id as string;
+          setTimeout(() => {
+            client.messages.delete(messageId, channelId).catch(() => {});
+          }, AUTO_DELETE_DELAY_MS);
+        }
+      })
+      .catch((err) => debug('Failed to send auto-delete message', err));
   }
 
   destroy(): void {

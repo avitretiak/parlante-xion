@@ -90,6 +90,7 @@ export default {
     resumed: '▶️ Reproducción reanudada.',
     endedTitle: 'Canción Finalizada',
     ended: 'Canción finalizada',
+    trackLoadFailed: (title: string) => `⚠️ No se pudo cargar **${title}** — saltando.`,
     unknownArtist: 'Artista desconocido',
   },
   favorites: {
