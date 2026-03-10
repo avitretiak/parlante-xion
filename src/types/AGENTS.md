@@ -28,29 +28,15 @@ types/
 
 ## Conventions
 
-**Import:** Always use `#parlante/types` or `#parlante/types/{file}`
+**Import:** `#parlante/types` for the barrel, `#parlante/types/{file}` for specific files. Both resolve via the wildcard catchall, with `#parlante/types` having a semantic override to `./src/types/index.ts`.
 ```typescript
 import type { ParlantePlayer } from '#parlante/types/player';
 import type { /* ... */ } from '#parlante/types';
 ```
 
-**Package.json mapping:**
-```json
-"#parlante/types": "./src/types/index.ts",
-"#parlante/types/*": "./src/types/*"
-```
-
-**tsconfig.json paths:**
-```json
-"#parlante/types": ["./src/types/index.ts"],
-"#parlante/types/*": ["./src/types/*"]
-```
-
 **Type-only imports:** Prefer `import type` for types (better tree-shaking, clearer intent)
 
 ## Notes
-
-**Duplication issue:** `src/types.ts` exists alongside `src/types/index.ts`. Package.json points to `types/index.ts` (canonical). Consider removing `types.ts` to avoid confusion.
 
 **Player types:** Most complex file. Defines ParlantePlayer state, track metadata, player events.
 
