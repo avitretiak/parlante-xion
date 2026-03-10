@@ -45,7 +45,6 @@ export function initKazagumo(client: Client): Kazagumo {
       send: (guildId, payload) =>
         client.gateway.send(client.gateway.calculateShardId(guildId), payload),
     },
-    // @ts-expect-error Seyfert connector type does not satisfy Kazagumo's Connector constraint due to protected member variance — works at runtime
     new Connectors.Seyfert(client),
     [],
     options,
@@ -102,10 +101,15 @@ export function initKazagumo(client: Client): Kazagumo {
     try {
       const parlantePlayer = playersManager.get(player.guildId);
       if (!parlantePlayer) return;
-      parlantePlayer.stopRefreshInterval();
-      parlantePlayer.cancelIdleTimer();
+
+      // Call destroy() FIRST - clears ALL timers atomically (debounce, idle, refresh)
+      parlantePlayer.destroy();
+
+      // Then perform async cleanup
       await parlantePlayer.clearVoiceStatus(typedClient);
       await parlantePlayer.deleteNowPlayingMessage(typedClient);
+
+      // Finally remove from manager
       playersManager.delete(player.guildId);
     } catch (err) {
       debug(`[${player.guildId}] Error in playerDestroy handler`, err);
