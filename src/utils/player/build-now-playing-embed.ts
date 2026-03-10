@@ -16,7 +16,6 @@ type Embed = {
 };
 
 const getMaxSongTitleLength = (title: string) => {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: needed for non-ASCII character detection
   const nonASCII = /[^\x00-\x7F]+/;
   return nonASCII.test(title) ? 28 : 48;
 };
