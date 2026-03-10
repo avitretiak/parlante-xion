@@ -9,6 +9,8 @@ docker-compose*
 .gitignore
 .vscode
 .idea
+.github
+.husky
 coverage
 tests
 drizzle.config.ts

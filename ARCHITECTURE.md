@@ -156,7 +156,7 @@ Defines error hierarchy: `AppError` (base), `PlayerError`, `ValidationError`, `C
 
 ### CI
 
-GitHub Actions on push to `main` — builds and pushes bot image to GHCR (multi-arch: amd64 + arm64).
+GitHub Actions on push to `main` — builds and pushes bot image to GHCR (amd64).
 
 ## Import Aliases
 

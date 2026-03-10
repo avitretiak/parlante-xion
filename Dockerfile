@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # ---- Dependencies Stage ----
 FROM oven/bun:1-alpine AS deps
 
@@ -5,7 +7,8 @@ WORKDIR /app
 
 COPY package.json bun.lock ./
 
-RUN bun install --frozen-lockfile --production --ignore-scripts
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    bun install --frozen-lockfile --production --ignore-scripts
 
 # ---- Final Runtime Stage ----
 FROM oven/bun:1-alpine
@@ -33,7 +36,6 @@ COPY src ./src
 COPY drizzle ./drizzle
 COPY seyfert.config.mjs ./
 COPY package.json ./
-COPY bun.lock ./
 
 ENV NODE_ENV=production
 ENV BUILD_DATE=${BUILD_DATE}
@@ -42,8 +44,5 @@ ENV VERSION=${VERSION}
 
 RUN mkdir -p /data && chown parlante:parlante /data
 USER parlante
-
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD kill -0 1 || exit 1
 
 CMD ["bun", "run", "src/index.ts", "migrate-and-start"]
