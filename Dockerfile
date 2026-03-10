@@ -36,6 +36,7 @@ COPY src ./src
 COPY drizzle ./drizzle
 COPY seyfert.config.mjs ./
 COPY package.json ./
+COPY tsconfig.json ./
 
 ENV NODE_ENV=production
 ENV BUILD_DATE=${BUILD_DATE}

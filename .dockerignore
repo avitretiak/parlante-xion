@@ -14,5 +14,4 @@ docker-compose*
 coverage
 tests
 drizzle.config.ts
-tsconfig.json
 .editorconfig
