@@ -5,11 +5,11 @@ import { LogLevels } from 'seyfert/lib/common/it/logger';
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator';
 import { DATA_DIR } from '#parlante/config';
 import { db } from '#parlante/db';
-import { initKazagumo } from './structures/kazagumo';
-import logBanner from './utils/system/log-banner';
+import { initKazagumo } from '#parlante/structures/kazagumo';
+import logBanner from '#parlante/utils/system/log-banner';
 import { debug, info, warn, error } from '#parlante/utils/system/logger';
-import { voiceGuard } from './middlewares/voice-guard';
-import { commandQueue } from './middlewares/command-queue';
+import { voiceGuard } from '#parlante/middlewares/voice-guard';
+import { commandQueue } from '#parlante/middlewares/command-queue';
 import messages from '#parlante/utils/constants/messages';
 
 // Route Seyfert's built-in Logger through LogTape
@@ -61,8 +61,12 @@ const client = new Client({
         });
       },
       onOptionsError: (ctx, metadata) => {
+        const message =
+          metadata && typeof metadata === 'object' && 'message' in metadata
+            ? (metadata as { message?: string }).message
+            : undefined;
         return ctx.write({
-          content: messages.error.optionsError((metadata as any).message ?? 'Invalid option'),
+          content: messages.error.optionsError(message ?? 'Invalid option'),
         });
       },
       onMiddlewaresError: async (ctx, err) => {

@@ -44,14 +44,9 @@
     "paths": {
       "#parlante/config": ["./src/services/config.ts"],
       "#parlante/db": ["./src/db/index.ts"],
-      "#parlante/db/*": ["./src/db/*"],
-      "#parlante/events/*": ["./src/events/*"],
-      "#parlante/managers/*": ["./src/managers/*"],
-      "#parlante/services/*": ["./src/services/*"],
-      "#parlante/structures/*": ["./src/structures/*"],
+      "#parlante/db/schema": ["./src/db/schema.ts"],
       "#parlante/types": ["./src/types/index.ts"],
-      "#parlante/types/*": ["./src/types/*"],
-      "#parlante/utils/*": ["./src/utils/*"]
+      "#parlante/*": ["./src/*"]
     }
   },
 
