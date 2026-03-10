@@ -16,8 +16,8 @@ type Embed = {
 };
 
 const getMaxSongTitleLength = (title: string) => {
-  const nonASCII = /[^\x00-\x7F]+/;
-  return nonASCII.test(title) ? 28 : 48;
+  const hasNonASCII = [...title].some((c) => c.charCodeAt(0) > 127);
+  return hasNonASCII ? 28 : 48;
 };
 
 const getPlayerUI = (kPlayer: KazagumoPlayer): string => {
