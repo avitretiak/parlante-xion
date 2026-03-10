@@ -160,4 +160,20 @@ GitHub Actions on push to `main` — builds and pushes bot image to GHCR (multi-
 
 ## Import Aliases
 
-All internal imports use `#parlante/*` subpath imports defined in both `package.json` `"imports"` and `tsconfig.json` `"paths"`. Example: `#parlante/utils/system/logger`, `#parlante/db/schema`.
+All internal imports use `#parlante/*` subpath imports defined in both `package.json` `"imports"` and `tsconfig.json` `"paths"`. Hybrid system: wildcard catchall (`#parlante/*` → `src/*`) with semantic overrides for non-obvious mappings (`#parlante/config` → `src/services/config.ts`, `#parlante/db` → `src/db/index.ts`, `#parlante/types` → `src/types/index.ts`).
+
+## Gotchas
+
+**Init order:** `initKazagumo()` MUST be called before `client.start()` — wrong order breaks audio entirely.
+
+**Import-time side effects:** DB initializes when `src/db/index.ts` is imported (not via explicit call).
+
+**Memory leak:** MUST call `ParlantePlayer.destroy()` before `playersManager.delete()`. Skipping `destroy()` leaks `debounceTimer`, `idleTimer`, and `refreshInterval`.
+
+**Middleware contract:** `voiceGuard` validates and calls `stop(errorMessage)` on failure. `onMiddlewaresError` in `src/index.ts` handles display. Never defer or write from `voiceGuard`.
+
+**CLI dispatch:** Entry point uses `process.argv[2]` to map to handlers (`migrate-and-start`, `register-commands`, `dev`). Not a standard entry point pattern.
+
+**Command registration:** Happens in `ready.ts` event handler, not a separate deploy script.
+
+**TTS constraints:** Only works while music is playing. Hardcoded to Flowery TTS, voice "Mateo", language "es-UY". No YouTube search, no queue, no voice/language selection.

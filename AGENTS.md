@@ -1,45 +1,62 @@
 # Agent Rules — parlante-xion
 
-## Project Context
+Discord music bot. Bun + Seyfert + Kazagumo/Shoukaku/NodeLink + Drizzle SQLite. Bilingual en/es-UY.
 
-Discord music bot. Bun runtime, Seyfert framework, Kazagumo/Shoukaku/NodeLink audio pipeline, Drizzle ORM + SQLite.
+## Deeper Documentation
 
-## Code Conventions
+| Document | Scope |
+|----------|-------|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System design, bootstrap, audio pipeline, gotchas |
+| [docs/COMMANDS.md](docs/COMMANDS.md) | Full command reference — options, flows, permissions |
+| [src/commands/AGENTS.md](src/commands/AGENTS.md) | Command handler conventions and patterns |
+| [src/types/AGENTS.md](src/types/AGENTS.md) | Type definitions navigation |
+| [src/utils/AGENTS.md](src/utils/AGENTS.md) | Utility functions navigation |
 
-- **Imports**: Use `#parlante/*` subpath imports (defined in `package.json` `"imports"` and `tsconfig.json` `"paths"`). Never use relative paths for cross-module imports.
-- **Commands**: Seyfert decorators (`@Declare`, `@Options`, `@Middlewares`). All playback/queue commands must use `@Middlewares(['voiceGuard', 'commandQueue'])`.
-- **Middlewares**: `voiceGuard` does validation only — calls `stop(errorMessage)` on failure, never defers or writes. `onMiddlewaresError` in `src/index.ts` handles display.
-- **Formatting**: oxfmt (`.oxfmtrc.json`). **Linting**: oxlint (`.oxlintrc.json`). Pre-commit hook runs both via husky + lint-staged.
-- **Logging**: Use `debug`, `info`, `warn`, `error` from `#parlante/utils/system/logger` (LogTape). Never use `console.log`.
-- **i18n**: All user-facing strings go through `messages` from `#parlante/utils/constants/messages`. Both `en.ts` and `es-UY.ts` must stay in parity — run `bun test` to verify.
-- **Error handling**: Async event handlers in `kazagumo.ts` must be wrapped in try/catch. Never suppress type errors with `as any` or `@ts-ignore`.
-- **Error classes**: Define in `src/utils/error/errors.ts`. No helper functions — only class definitions.
-- **Type safety**: Single `@ts-expect-error` exists in `kazagumo.ts` for Seyfert connector variance — documented, intentional.
+## Where to Look
 
-## Architecture Boundaries
+| Task | Location |
+|------|----------|
+| Add command | `src/commands/` |
+| Audio pipeline | `src/structures/kazagumo.ts` |
+| Player state | `src/managers/players.ts` |
+| i18n messages | `src/languages/` |
+| DB schema | `src/db/schema.ts` |
+| Middleware | `src/middlewares/` |
+| TTS | `src/services/tts/` |
 
-- `src/commands/` — Slash command handlers only. Business logic stays in services.
-- `src/services/` — Stateless business logic. No Discord API calls except through Seyfert client.
-- `src/structures/` — Stateful wrappers (ParlantePlayer, Kazagumo init). `ParlantePlayer.destroy()` must be called before removing from PlayersManager (clears timers).
-- `src/middlewares/` — Seyfert middleware. voiceGuard = validation, commandQueue = serialization.
-- `src/utils/` — Pure utilities. No state, no side effects.
+## Conventions
 
-## TTS Rules
+**Imports:** `#parlante/*` subpath imports only (never relative cross-module). Defined in `package.json` imports + `tsconfig.json` paths.
 
-TTS only works while music is playing. Uses NodeLink mixer overlay with Flowery TTS (Mateo, es-UY). No YouTube search, no queue, no language/voice selection. Hardcoded and simple.
+**Commands:** Seyfert decorators `@Declare`, `@Options`, `@Middlewares`. Playback/queue commands require `@Middlewares(['commandQueue', 'voiceGuard'])`. Business logic stays in `src/services/`.
 
-## Database
+**Logging:** `debug`, `info`, `warn`, `error` from `#parlante/utils/system/logger`. Never `console.log` (exception: `log-banner.ts` startup).
 
-Drizzle ORM + Bun SQLite. Migrations in `drizzle/`, run on startup with `migrate-and-start`. Schema in `src/db/schema.ts`. Three tables: KeyValueCache, Setting, FavoriteQuery.
+**Error classes:** Class definitions only in `src/utils/error/errors.ts`. No helper functions.
 
-## Testing
+**Formatting + Linting:** oxfmt (`.oxfmtrc.json`), oxlint (`.oxlintrc.json`). Pre-commit hook runs both.
 
-`bun test` — tests in `tests/`. i18n parity test enforces language key match between en.ts and es-UY.ts.
+**i18n:** `en.ts` and `es-UY.ts` must stay synchronized. `bun test` enforces key parity.
 
-## Docker
+## Anti-Patterns
 
-2-stage build on `oven/bun:1-alpine`. Runs as non-root `parlante` user. NodeLink runs as separate container (`performanc/nodelink:latest`). YouTube cipher as third container.
+- Never relative imports cross-module (use `#parlante/*`)
+- Never `console.log` (except `log-banner.ts`)
+- Never `as any` or `@ts-ignore` (single documented `@ts-expect-error` in `kazagumo.ts` is intentional)
+- Never skip `ParlantePlayer.destroy()` before `playersManager.delete()` — leaks timers
+- Never put business logic in command handlers (use services)
+- Never defer/write from middlewares (voiceGuard only validates)
+
+## Commands
+
+```bash
+bun run dev          # start bot
+bun run typecheck    # type check
+bun test             # tests (i18n parity)
+bun run lint         # oxlint
+bun run format       # oxfmt
+```
 
 ## Commit Rules
 
-No co-authorship trailers. No AI attribution in commits.
+No co-authorship trailers. No AI attribution.
