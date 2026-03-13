@@ -18,7 +18,7 @@ Discord Gateway
     ↓
 Seyfert Client (src/index.ts)
     ↓
-Middlewares: commandQueue → voiceGuard
+Middlewares: voiceGuard → commandQueue
     ↓
 Command Handlers (src/commands/)
     ↓
@@ -64,7 +64,7 @@ commands/
 └── queue/       # queue, skip, next, unskip, shuffle, remove, move, clear
 ```
 
-All playback/queue commands use `@Middlewares(['commandQueue', 'voiceGuard'])`. See `docs/COMMANDS.md` for the full command reference with options, flows, and permissions.
+All playback/queue commands use `@Middlewares(['voiceGuard', 'commandQueue'])`. See `docs/COMMANDS.md` for the full command reference with options, flows, and permissions.
 
 ## Middlewares (`src/middlewares/`)
 
@@ -169,6 +169,8 @@ All internal imports use `#parlante/*` subpath imports defined in both `package.
 **Import-time side effects:** DB initializes when `src/db/index.ts` is imported (not via explicit call).
 
 **Memory leak:** MUST call `ParlantePlayer.destroy()` before `playersManager.delete()`. Skipping `destroy()` leaks `debounceTimer`, `idleTimer`, and `refreshInterval`.
+
+**Middleware ordering:** `commandQueue` MUST be the last middleware in the chain. Seyfert's `stop()` resolves the framework promise without unwinding `await next()` in upstream middlewares — any middleware that acquires a resource (like `commandQueue`'s per-guild lock) will deadlock if a downstream middleware calls `stop()`. All guard/validation middlewares go before `commandQueue`.
 
 **Middleware contract:** `voiceGuard` validates and calls `stop(errorMessage)` on failure. `onMiddlewaresError` in `src/index.ts` handles display. Never defer or write from `voiceGuard`.
 

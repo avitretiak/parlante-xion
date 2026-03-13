@@ -32,7 +32,7 @@ commands/
   name: 'command-name',
   description: messages.commands.commandName.description,
 })
-@Middlewares(['commandQueue', 'voiceGuard'])  // playback/queue only
+@Middlewares(['voiceGuard', 'commandQueue'])  // playback/queue only
 export default class CommandName extends Command {
   async run(ctx: CommandContext) {
     await ctx.deferReply();  // Or deferReply(true) for ephemeral
