@@ -12,6 +12,11 @@ const EDIT_FAILURE_COOLDOWN_MS = 15_000; // 15 seconds
 const AUTO_DELETE_DELAY_MS = 10_000; // 10 seconds
 const MIX_LAYER_SAFETY_TIMEOUT_MS = 120_000; // 2 minutes — fallback if MixEndedEvent never arrives
 
+type QueuedMixLayer = {
+  encodedTrack: string;
+  volume: number;
+};
+
 type Embed = {
   color?: number;
   title?: string;
@@ -33,6 +38,8 @@ export class ParlantePlayer {
   private lastMessageSentAt = 0;
   private lastEditFailureTime = 0;
   private readonly activeMixes = new Map<string, NodeJS.Timeout>();
+  private readonly ttsQueue: QueuedMixLayer[] = [];
+  private ttsPlaying = false;
 
   constructor(
     public readonly kazagumoPlayer: KazagumoPlayer,
@@ -174,29 +181,11 @@ export class ParlantePlayer {
       .catch((err) => debug('Failed to send auto-delete message', err));
   }
 
-  async addMixLayer(encodedTrack: string, volume: number): Promise<boolean> {
-    const sessionId = this.kazagumoPlayer.shoukaku.node.sessionId;
-    if (!sessionId) {
-      warn(`[${this.guildId}] No session ID available for mix layer`);
-      return false;
+  addMixLayer(encodedTrack: string, volume: number): boolean {
+    this.ttsQueue.push({ encodedTrack, volume });
+    if (!this.ttsPlaying) {
+      this.playNextTts();
     }
-
-    let layer = await mixerAdd(sessionId, this.guildId, encodedTrack, volume);
-
-    if (!layer) {
-      debug(`[${this.guildId}] Mix layer failed, attempting cleanup and retry`);
-      await this.cleanupMixLayers();
-      layer = await mixerAdd(sessionId, this.guildId, encodedTrack, volume);
-    }
-
-    if (!layer) return false;
-
-    const mixId = layer.id;
-    const timeout = setTimeout(() => {
-      this.activeMixes.delete(mixId);
-      debug(`[${this.guildId}] Mix layer ${mixId} expired by safety timeout`);
-    }, MIX_LAYER_SAFETY_TIMEOUT_MS);
-    this.activeMixes.set(mixId, timeout);
     return true;
   }
 
@@ -206,9 +195,14 @@ export class ParlantePlayer {
     clearTimeout(timeout);
     this.activeMixes.delete(mixId);
     debug(`[${this.guildId}] Mix layer ended: ${mixId}`);
+    this.ttsPlaying = false;
+    this.playNextTts();
   }
 
   async cleanupMixLayers(): Promise<void> {
+    this.ttsQueue.length = 0;
+    this.ttsPlaying = false;
+
     for (const timeout of this.activeMixes.values()) {
       clearTimeout(timeout);
     }
@@ -223,7 +217,57 @@ export class ParlantePlayer {
     this.clearPending();
     this.cancelIdleTimer();
     this.stopRefreshInterval();
+    this.ttsQueue.length = 0;
+    this.ttsPlaying = false;
     this.clearMixTimeouts();
+  }
+
+  private playNextTts(): void {
+    const next = this.ttsQueue.shift();
+    if (!next) return;
+
+    this.ttsPlaying = true;
+    this.dispatchMixLayer(next.encodedTrack, next.volume);
+  }
+
+  private dispatchMixLayer(encodedTrack: string, volume: number): void {
+    const sessionId = this.kazagumoPlayer.shoukaku.node.sessionId;
+    if (!sessionId) {
+      warn(`[${this.guildId}] No session ID available for mix layer`);
+      this.ttsPlaying = false;
+      this.playNextTts();
+      return;
+    }
+
+    mixerAdd(sessionId, this.guildId, encodedTrack, volume)
+      .then(async (layer) => {
+        if (!layer) {
+          debug(`[${this.guildId}] Mix layer failed, attempting cleanup and retry`);
+          await this.cleanupMixLayers();
+          layer = await mixerAdd(sessionId, this.guildId, encodedTrack, volume);
+        }
+
+        if (!layer) {
+          warn(`[${this.guildId}] Mix layer failed after retry`);
+          this.ttsPlaying = false;
+          this.playNextTts();
+          return;
+        }
+
+        const mixId = layer.id;
+        const timeout = setTimeout(() => {
+          this.activeMixes.delete(mixId);
+          debug(`[${this.guildId}] Mix layer ${mixId} expired by safety timeout`);
+          this.ttsPlaying = false;
+          this.playNextTts();
+        }, MIX_LAYER_SAFETY_TIMEOUT_MS);
+        this.activeMixes.set(mixId, timeout);
+      })
+      .catch((err) => {
+        warn(`[${this.guildId}] Mix layer dispatch error`, err);
+        this.ttsPlaying = false;
+        this.playNextTts();
+      });
   }
 
   private clearPending(): void {
