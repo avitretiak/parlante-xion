@@ -6,7 +6,7 @@ import messages from '#parlante/utils/constants/messages';
   name: 'loop-queue',
   description: messages.commands.loopQueue.description,
 })
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class LoopQueueCommand extends Command {
   async run(ctx: CommandContext) {
     const guildId = ctx.guildId!;

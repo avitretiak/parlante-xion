@@ -6,7 +6,7 @@ import messages from '#parlante/utils/constants/messages';
   name: 'resume',
   description: messages.commands.resume.description,
 })
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class ResumeCommand extends Command {
   async run(ctx: CommandContext) {
     const guildId = ctx.guildId!;

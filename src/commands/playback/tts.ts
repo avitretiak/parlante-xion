@@ -33,7 +33,7 @@ const ttsOptions = {
   description: messages.commands.tts.description,
 })
 @Options(ttsOptions)
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class TtsCommand extends Command {
   async run(ctx: CommandContext<typeof ttsOptions>) {
     await ctx.deferReply(true);

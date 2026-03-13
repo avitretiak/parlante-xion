@@ -38,7 +38,7 @@ function formatMs(ms: number): string {
 @Options({
   time: createStringOption({ description: messages.commands.fseek.time, required: true }),
 })
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class FSeekCommand extends Command {
   async run(ctx: CommandContext) {
     const time = (ctx.options as Record<string, string | undefined>).time;

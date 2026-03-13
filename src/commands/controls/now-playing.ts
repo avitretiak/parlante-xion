@@ -7,7 +7,7 @@ import { buildNowPlayingEmbed } from '#parlante/utils/player/build-now-playing-e
   name: 'now-playing',
   description: messages.commands.nowPlaying.description,
 })
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class NowPlayingCommand extends Command {
   async run(ctx: CommandContext) {
     const guildId = ctx.guildId!;

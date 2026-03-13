@@ -21,7 +21,7 @@ const skipOptions = {
   description: messages.commands.skip.description,
 })
 @Options(skipOptions)
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class SkipCommand extends Command {
   async run(ctx: CommandContext<typeof skipOptions>) {
     const guildId = ctx.guildId!;

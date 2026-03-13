@@ -6,7 +6,7 @@ import messages from '#parlante/utils/constants/messages';
   name: 'stop',
   description: messages.commands.stop.description,
 })
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class StopCommand extends Command {
   async run(ctx: CommandContext) {
     const guildId = ctx.guildId!;

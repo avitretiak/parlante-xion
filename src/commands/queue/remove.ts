@@ -22,7 +22,7 @@ const removeOptions = {
   description: messages.commands.remove.description,
 })
 @Options(removeOptions)
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class RemoveCommand extends Command {
   async run(ctx: CommandContext<typeof removeOptions>) {
     const guildId = ctx.guildId!;

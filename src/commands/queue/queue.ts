@@ -26,7 +26,7 @@ const queueOptions = {
   description: messages.commands.queue.description,
 })
 @Options(queueOptions)
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class QueueCommand extends Command {
   async run(ctx: CommandContext<typeof queueOptions>) {
     const guildId = ctx.guildId!;

@@ -6,7 +6,7 @@ import messages from '#parlante/utils/constants/messages';
   name: 'clear',
   description: messages.commands.clear.description,
 })
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class ClearCommand extends Command {
   async run(ctx: CommandContext) {
     const guildId = ctx.guildId!;

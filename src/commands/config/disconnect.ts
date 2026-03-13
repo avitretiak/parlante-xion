@@ -6,7 +6,7 @@ import messages from '#parlante/utils/constants/messages';
   name: 'disconnect',
   description: messages.commands.disconnect.description,
 })
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class DisconnectCommand extends Command {
   async run(ctx: CommandContext) {
     const guildId = ctx.guildId!;

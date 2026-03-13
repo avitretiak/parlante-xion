@@ -98,7 +98,7 @@ const playOptions = {
   description: messages.commands.play.description,
 })
 @Options(playOptions)
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class PlayCommand extends Command {
   async onAutocomplete(interaction: AutocompleteInteraction) {
     await playOptions.query.autocomplete!(interaction);

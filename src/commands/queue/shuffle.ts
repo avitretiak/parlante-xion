@@ -6,7 +6,7 @@ import messages from '#parlante/utils/constants/messages';
   name: 'shuffle',
   description: messages.commands.shuffle.description,
 })
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class ShuffleCommand extends Command {
   async run(ctx: CommandContext) {
     const guildId = ctx.guildId!;

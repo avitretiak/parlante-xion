@@ -6,7 +6,7 @@ import messages from '#parlante/utils/constants/messages';
   name: 'unskip',
   description: messages.commands.unskip.description,
 })
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class UnskipCommand extends Command {
   async run(ctx: CommandContext) {
     const guildId = ctx.guildId!;

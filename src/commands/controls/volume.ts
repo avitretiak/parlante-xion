@@ -24,7 +24,7 @@ const volumeOptions = {
   description: messages.commands.volume.description,
 })
 @Options(volumeOptions)
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class VolumeCommand extends Command {
   async run(ctx: CommandContext<typeof volumeOptions>) {
     const guildId = ctx.guildId!;

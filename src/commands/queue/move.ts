@@ -27,7 +27,7 @@ const moveOptions = {
   description: messages.commands.move.description,
 })
 @Options(moveOptions)
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class MoveCommand extends Command {
   async run(ctx: CommandContext<typeof moveOptions>) {
     const guildId = ctx.guildId!;

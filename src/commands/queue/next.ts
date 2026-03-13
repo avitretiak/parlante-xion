@@ -6,7 +6,7 @@ import messages from '#parlante/utils/constants/messages';
   name: 'next',
   description: messages.commands.next.description,
 })
-@Middlewares(['commandQueue', 'voiceGuard'])
+@Middlewares(['voiceGuard', 'commandQueue'])
 export default class NextCommand extends Command {
   async run(ctx: CommandContext) {
     const guildId = ctx.guildId!;
