@@ -7,12 +7,6 @@ export type MixLayer = {
   volume: number;
 };
 
-type MixLayerResponse = {
-  id: string;
-  track: { encoded: string };
-  volume: number;
-};
-
 type MixErrorResponse = {
   message?: string;
 };
@@ -43,7 +37,7 @@ export async function addMixLayer(
     });
 
     if (response.ok) {
-      const data = (await response.json()) as MixLayerResponse;
+      const data = (await response.json()) as MixLayer;
       debug(`[${guildId}] Mix layer added: ${data.id}`);
       return { id: data.id, track: data.track, volume: data.volume };
     }
@@ -67,7 +61,8 @@ export async function listMixLayers(sessionId: string, guildId: string): Promise
     });
 
     if (response.ok) {
-      return (await response.json()) as MixLayer[];
+      const data = (await response.json()) as { mixes: MixLayer[] };
+      return data.mixes ?? [];
     }
 
     debug(`[${guildId}] Mix layer GET failed (${response.status})`);
