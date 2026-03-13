@@ -63,6 +63,13 @@ export function initKazagumo(client: Client): Kazagumo {
     warn(messages.debug.nodeLinkDisconnected(name));
   });
 
+  kazagumo.shoukaku.on('raw', (_name, json) => {
+    const event = json as { op?: string; type?: string; guildId?: string; mixId?: string };
+    if (event.op !== 'event' || event.type !== 'MixEndedEvent') return;
+    if (!event.guildId || !event.mixId) return;
+    playersManager.get(event.guildId)?.onMixEnded(event.mixId);
+  });
+
   kazagumo.on('playerStart', async (player, track) => {
     try {
       const parlantePlayer = playersManager.get(player.guildId);
@@ -88,6 +95,7 @@ export function initKazagumo(client: Client): Kazagumo {
       const parlantePlayer = playersManager.get(player.guildId);
       if (!parlantePlayer) return;
       parlantePlayer.stopRefreshInterval();
+      await parlantePlayer.cleanupMixLayers();
       await parlantePlayer.sendQueueEnded(typedClient);
       await parlantePlayer.clearVoiceStatus(typedClient);
       const settings = await getGuildSettings(player.guildId);
@@ -102,14 +110,12 @@ export function initKazagumo(client: Client): Kazagumo {
       const parlantePlayer = playersManager.get(player.guildId);
       if (!parlantePlayer) return;
 
-      // Call destroy() FIRST - clears ALL timers atomically (debounce, idle, refresh)
       parlantePlayer.destroy();
+      await parlantePlayer.cleanupMixLayers();
 
-      // Then perform async cleanup
       await parlantePlayer.clearVoiceStatus(typedClient);
       await parlantePlayer.deleteNowPlayingMessage(typedClient);
 
-      // Finally remove from manager
       playersManager.delete(player.guildId);
     } catch (err) {
       debug(`[${player.guildId}] Error in playerDestroy handler`, err);

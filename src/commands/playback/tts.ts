@@ -9,17 +9,10 @@ import {
 import { MessageFlags } from 'seyfert/lib/types/payloads/channel';
 import { LoadType } from 'shoukaku';
 import messages from '#parlante/utils/constants/messages';
-import { buildNodeConfig } from '#parlante/structures/kazagumo';
-import { debug, warn } from '#parlante/utils/system/logger';
+import { playersManager } from '#parlante/managers/players';
 
 const TTS_VOICE = 'Mateo';
 const TTS_MIX_VOLUME = 1.0;
-
-function buildNodeLinkRestUrl(): { baseUrl: string; auth: string } {
-  const cfg = buildNodeConfig();
-  const protocol = cfg.secure ? 'https' : 'http';
-  return { baseUrl: `${protocol}://${cfg.url}`, auth: cfg.auth };
-}
 
 const ttsOptions = {
   message: createStringOption({
@@ -70,24 +63,8 @@ export default class TtsCommand extends Command {
       return;
     }
 
-    const { baseUrl, auth } = buildNodeLinkRestUrl();
-    const mixUrl = `${baseUrl}/v4/sessions/${node.sessionId}/players/${guildId}/mix`;
-
-    let response: Response;
-    try {
-      response = await fetch(mixUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: auth,
-        },
-        body: JSON.stringify({
-          track: { encoded: result.data.encoded },
-          volume: TTS_MIX_VOLUME,
-        }),
-      });
-    } catch (err) {
-      warn(`[${guildId}] NodeLink mixer request failed`, err);
+    const parlantePlayer = playersManager.get(guildId);
+    if (!parlantePlayer) {
       await ctx.editOrReply({
         content: messages.error.commandFailed,
         flags: MessageFlags.Ephemeral,
@@ -95,8 +72,8 @@ export default class TtsCommand extends Command {
       return;
     }
 
-    if (!response.ok) {
-      warn(`[${guildId}] NodeLink mixer returned ${response.status}`);
+    const success = await parlantePlayer.addMixLayer(result.data.encoded, TTS_MIX_VOLUME);
+    if (!success) {
       await ctx.editOrReply({
         content: messages.error.commandFailed,
         flags: MessageFlags.Ephemeral,
@@ -104,7 +81,6 @@ export default class TtsCommand extends Command {
       return;
     }
 
-    debug(`[${guildId}] TTS mix layer added over current track`);
     await ctx.editOrReply({
       content: messages.commands.tts.speaking(message),
       flags: MessageFlags.Ephemeral,
