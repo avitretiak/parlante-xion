@@ -3,12 +3,14 @@ import type { UsingClient } from 'seyfert';
 import type { ActionRow, Button } from 'seyfert';
 import messages from '#parlante/utils/constants/messages';
 import { buildNowPlayingEmbed } from '#parlante/utils/player/build-now-playing-embed';
-import { debug } from '#parlante/utils/system/logger';
+import { debug, warn } from '#parlante/utils/system/logger';
+import { addMixLayer as mixerAdd, deleteAllMixLayers } from '#parlante/services/mixer';
 
 const EMBED_DEBOUNCE_MS = 5000;
 const MESSAGE_REPLACEMENT_THRESHOLD_MS = 45 * 60 * 1000; // 45 minutes
 const EDIT_FAILURE_COOLDOWN_MS = 15_000; // 15 seconds
 const AUTO_DELETE_DELAY_MS = 10_000; // 10 seconds
+const MIX_LAYER_SAFETY_TIMEOUT_MS = 120_000; // 2 minutes — fallback if MixEndedEvent never arrives
 
 type Embed = {
   color?: number;
@@ -30,6 +32,7 @@ export class ParlantePlayer {
   private refreshInterval: NodeJS.Timeout | null = null;
   private lastMessageSentAt = 0;
   private lastEditFailureTime = 0;
+  private readonly activeMixes = new Map<string, NodeJS.Timeout>();
 
   constructor(
     public readonly kazagumoPlayer: KazagumoPlayer,
@@ -171,10 +174,56 @@ export class ParlantePlayer {
       .catch((err) => debug('Failed to send auto-delete message', err));
   }
 
+  async addMixLayer(encodedTrack: string, volume: number): Promise<boolean> {
+    const sessionId = this.kazagumoPlayer.shoukaku.node.sessionId;
+    if (!sessionId) {
+      warn(`[${this.guildId}] No session ID available for mix layer`);
+      return false;
+    }
+
+    let layer = await mixerAdd(sessionId, this.guildId, encodedTrack, volume);
+
+    if (!layer) {
+      debug(`[${this.guildId}] Mix layer failed, attempting cleanup and retry`);
+      await this.cleanupMixLayers();
+      layer = await mixerAdd(sessionId, this.guildId, encodedTrack, volume);
+    }
+
+    if (!layer) return false;
+
+    const mixId = layer.id;
+    const timeout = setTimeout(() => {
+      this.activeMixes.delete(mixId);
+      debug(`[${this.guildId}] Mix layer ${mixId} expired by safety timeout`);
+    }, MIX_LAYER_SAFETY_TIMEOUT_MS);
+    this.activeMixes.set(mixId, timeout);
+    return true;
+  }
+
+  onMixEnded(mixId: string): void {
+    const timeout = this.activeMixes.get(mixId);
+    if (!timeout) return;
+    clearTimeout(timeout);
+    this.activeMixes.delete(mixId);
+    debug(`[${this.guildId}] Mix layer ended: ${mixId}`);
+  }
+
+  async cleanupMixLayers(): Promise<void> {
+    for (const timeout of this.activeMixes.values()) {
+      clearTimeout(timeout);
+    }
+    this.activeMixes.clear();
+
+    const sessionId = this.kazagumoPlayer.shoukaku.node.sessionId;
+    if (!sessionId) return;
+    await deleteAllMixLayers(sessionId, this.guildId);
+  }
+
   destroy(): void {
     this.clearPending();
     this.cancelIdleTimer();
     this.stopRefreshInterval();
+    this.clearMixTimeouts();
   }
 
   private clearPending(): void {
@@ -183,6 +232,13 @@ export class ParlantePlayer {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
+  }
+
+  private clearMixTimeouts(): void {
+    for (const timeout of this.activeMixes.values()) {
+      clearTimeout(timeout);
+    }
+    this.activeMixes.clear();
   }
 
   private async performNowPlayingUpdate(client: UsingClient, channelId: string): Promise<void> {
