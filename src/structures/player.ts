@@ -26,6 +26,17 @@ type Embed = {
   footer?: { text: string };
 };
 
+// Snapshot captured at playerClosed time so the resume handler knows exactly
+// which track was interrupted and where it was.
+export type ResumeSnapshot = {
+  trackId: string;
+  position: number;
+  paused: boolean;
+  isStream: boolean;
+  isSeekable: boolean;
+  length: number;
+};
+
 export class ParlantePlayer {
   public textChannelId: string;
   private lastMessageId: string | null = null;
@@ -41,12 +52,64 @@ export class ParlantePlayer {
   private readonly ttsQueue: QueuedMixLayer[] = [];
   private ttsPlaying = false;
 
+  // Track-scoped position tracking — reset on every playerStart so a stale
+  // position from a previous track can never bleed into a resume attempt.
+  private lastKnownTrackId: string | null = null;
+  public lastKnownPosition = 0;
+
+  // Single-flight resume guard — prevents stacked replays from multiple
+  // consecutive close events and allows cancellation on destroy/skip.
+  private resumeTimer: NodeJS.Timeout | null = null;
+  private resumeNonce = 0;
+
   constructor(
     public readonly kazagumoPlayer: KazagumoPlayer,
     public readonly guildId: string,
     textChannelId: string,
   ) {
     this.textChannelId = textChannelId;
+  }
+
+  // Called from playerStart so position tracking is always scoped to the
+  // current track. Clears any pending resume from a previous track.
+  resetPositionTracking(trackId: string): void {
+    this.lastKnownTrackId = trackId;
+    this.lastKnownPosition = 0;
+    this.cancelResumeTimer();
+  }
+
+  // Called from playerUpdate. Only records position when the update belongs to
+  // the track we started tracking, preventing cross-track position bleed.
+  recordPosition(trackId: string, position: number): void {
+    if (this.lastKnownTrackId !== trackId) return;
+    this.lastKnownPosition = position;
+  }
+
+  // Schedule a single-flight reconnect resume. Returns the nonce assigned to
+  // this attempt so the caller can verify it is still current when it fires.
+  scheduleResumeTimer(delayMs: number, fn: () => void): number {
+    this.cancelResumeTimer();
+    const nonce = ++this.resumeNonce;
+    this.resumeTimer = setTimeout(() => {
+      this.resumeTimer = null;
+      fn();
+    }, delayMs);
+    return nonce;
+  }
+
+  // Returns true if the given nonce is still the active resume attempt.
+  isResumeNonceCurrent(nonce: number): boolean {
+    return this.resumeNonce === nonce;
+  }
+
+  cancelResumeTimer(): void {
+    if (this.resumeTimer) {
+      clearTimeout(this.resumeTimer);
+      this.resumeTimer = null;
+    }
+    // Incrementing the nonce invalidates any in-flight async resume that
+    // checked the nonce before the await but fires after cancelResumeTimer.
+    this.resumeNonce++;
   }
 
   async sendOrUpdateNowPlaying(client: UsingClient, immediate = false): Promise<void> {
@@ -216,6 +279,7 @@ export class ParlantePlayer {
   destroy(): void {
     this.clearPending();
     this.cancelIdleTimer();
+    this.cancelResumeTimer();
     this.stopRefreshInterval();
     this.ttsQueue.length = 0;
     this.ttsPlaying = false;
