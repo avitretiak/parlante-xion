@@ -16,6 +16,7 @@ import { playersManager } from '#parlante/managers/players';
 import { getGuildSettings } from '#parlante/utils/config/get-guild-settings';
 import { truncate } from '#parlante/utils/general/string';
 import { prettyTime } from '#parlante/utils/general/time';
+import { debug } from '#parlante/utils/system/logger';
 
 // Cache autocomplete results to avoid hammering NodeLink on every keystroke
 const autocompleteCache = new Map<
@@ -116,6 +117,12 @@ export default class PlayCommand extends Command {
     const voiceId = voiceState!.channelId!;
 
     const result = await searchTracks(kazagumo, query.trim(), guildId);
+    debug(`[${guildId}] /play search diagnostics`, {
+      query: query.trim(),
+      resultType: result.type,
+      tracksFound: result.tracks?.length ?? 0,
+      playlistName: result.playlistName,
+    });
     if (!result.tracks || result.tracks.length === 0) {
       await ctx.editOrReply({
         content: messages.error.noSongsFound,
@@ -139,12 +146,19 @@ export default class PlayCommand extends Command {
 
     let kPlayer = kazagumo.players.get(guildId);
     if (!kPlayer) {
+      const shardId = ctx.client.gateway.calculateShardId(guildId);
       kPlayer = await kazagumo.createPlayer({
         guildId,
         voiceId,
         textId: ctx.channelId!,
         deaf: true,
-        shardId: 0,
+        shardId,
+      });
+
+      debug(`[${guildId}] /play createPlayer diagnostics`, {
+        voiceId,
+        textId: ctx.channelId,
+        shardId,
       });
 
       playersManager.create(guildId, kPlayer, ctx.channelId!);
@@ -161,13 +175,40 @@ export default class PlayCommand extends Command {
       shuffle: shuffle ?? false,
     });
 
+    debug(`[${guildId}] /play queue diagnostics`, {
+      immediate: immediate ?? false,
+      shuffle: shuffle ?? false,
+      skip: skip ?? false,
+      addedTracks: tracks.length,
+      queueSize: kPlayer.queue.size,
+      hasCurrentTrack: Boolean(kPlayer.queue.current),
+      playerState: kPlayer.state,
+      playing: kPlayer.playing,
+      paused: kPlayer.paused,
+    });
+
     const skipCurrentTrack = skip ?? false;
     if (skipCurrentTrack && kPlayer.queue.current) {
       kPlayer.skip();
     }
 
     if (!kPlayer.playing && !kPlayer.paused) {
+      debug(`[${guildId}] /play play() trigger diagnostics`, {
+        reason: 'player_not_playing_and_not_paused',
+        queueSize: kPlayer.queue.size,
+        hasCurrentTrack: Boolean(kPlayer.queue.current),
+        playerState: kPlayer.state,
+      });
       await kPlayer.play();
+    } else {
+      debug(`[${guildId}] /play play() skipped diagnostics`, {
+        reason: 'already_playing_or_paused',
+        queueSize: kPlayer.queue.size,
+        hasCurrentTrack: Boolean(kPlayer.queue.current),
+        playerState: kPlayer.state,
+        playing: kPlayer.playing,
+        paused: kPlayer.paused,
+      });
     }
 
     const track = result.tracks[0]!;

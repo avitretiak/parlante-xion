@@ -1,6 +1,7 @@
 import { Client, type UsingClient } from 'seyfert';
 import { Kazagumo } from 'kazagumo';
 import { PlayerState } from 'kazagumo';
+import type { KazagumoPlayer } from 'kazagumo';
 import { Connectors, type NodeOption, type ShoukakuOptions } from 'shoukaku';
 import { playersManager } from '../managers/players';
 import type { ResumeSnapshot } from '../structures/player';
@@ -16,6 +17,57 @@ const DEFAULT_NODELINK_URL = 'localhost:2333';
 const RECONNECT_RESUME_DELAY_MS = 3_000;
 // Maximum retry attempts before giving up on auto-resume.
 const RECONNECT_RESUME_MAX_RETRIES = 3;
+const RECOVERY_FAILURE_RESET_MS = 120_000;
+const RECOVERY_RESET_THRESHOLD = 2;
+const RECOVERY_LOCK_MS = 5_000;
+
+type RecoveryState = {
+  consecutiveFailures: number;
+  lastFailureAt: number;
+  recovering: boolean;
+};
+
+type TrackDiagnostics = {
+  title?: string;
+  identifier?: string;
+  uri?: string;
+  sourceName?: string;
+  isStream?: boolean;
+  isSeekable?: boolean;
+  length?: number;
+};
+
+const getTrackDiagnostics = (track: unknown): TrackDiagnostics => {
+  if (!track || typeof track !== 'object') return {};
+  const t = track as {
+    title?: string;
+    identifier?: string;
+    uri?: string;
+    sourceName?: string;
+    isStream?: boolean;
+    isSeekable?: boolean;
+    length?: number;
+    info?: {
+      title?: string;
+      identifier?: string;
+      uri?: string;
+      sourceName?: string;
+      isStream?: boolean;
+      isSeekable?: boolean;
+      length?: number;
+    };
+  };
+
+  return {
+    title: t.title ?? t.info?.title,
+    identifier: t.identifier ?? t.info?.identifier,
+    uri: t.uri ?? t.info?.uri,
+    sourceName: t.sourceName ?? t.info?.sourceName,
+    isStream: t.isStream ?? t.info?.isStream,
+    isSeekable: t.isSeekable ?? t.info?.isSeekable,
+    length: t.length ?? t.info?.length,
+  };
+};
 
 export const buildNodeConfig = (): NodeOption => {
   const rawUrl = process.env.NODELINK_URL ?? DEFAULT_NODELINK_URL;
@@ -40,6 +92,86 @@ export const buildNodeConfig = (): NodeOption => {
 
 export function initKazagumo(client: Client): Kazagumo {
   const typedClient = client as unknown as UsingClient;
+  const recoveryStates = new Map<string, RecoveryState>();
+
+  const clearRecoveryState = (guildId: string): void => {
+    recoveryStates.delete(guildId);
+  };
+
+  const getOrCreateRecoveryState = (guildId: string): RecoveryState => {
+    const existing = recoveryStates.get(guildId);
+    if (existing) return existing;
+
+    const created: RecoveryState = {
+      consecutiveFailures: 0,
+      lastFailureAt: 0,
+      recovering: false,
+    };
+    recoveryStates.set(guildId, created);
+    return created;
+  };
+
+  const registerRecoveryFailure = (guildId: string): number => {
+    const state = getOrCreateRecoveryState(guildId);
+    const now = Date.now();
+
+    if (now - state.lastFailureAt > RECOVERY_FAILURE_RESET_MS) {
+      state.consecutiveFailures = 1;
+      state.lastFailureAt = now;
+      return state.consecutiveFailures;
+    }
+
+    state.consecutiveFailures += 1;
+    state.lastFailureAt = now;
+    return state.consecutiveFailures;
+  };
+
+  const scheduleRecoveryUnlock = (guildId: string): void => {
+    setTimeout(() => {
+      const state = recoveryStates.get(guildId);
+      if (!state) return;
+      state.recovering = false;
+    }, RECOVERY_LOCK_MS);
+  };
+
+  const recoverFromPlaybackFailure = async (player: KazagumoPlayer): Promise<void> => {
+    const guildId = player.guildId;
+    const state = getOrCreateRecoveryState(guildId);
+
+    if (state.recovering) {
+      debug(`[${guildId}] Recovery already in progress; skipping duplicate recovery attempt`);
+      return;
+    }
+
+    const failureCount = registerRecoveryFailure(guildId);
+    state.recovering = true;
+    scheduleRecoveryUnlock(guildId);
+
+    debug(`[${guildId}] Recovery diagnostics`, {
+      failureCount,
+      threshold: RECOVERY_RESET_THRESHOLD,
+      playerState: player.state,
+      playing: player.playing,
+      paused: player.paused,
+      queueSize: player.queue.size,
+      hasCurrentTrack: Boolean(player.queue.current),
+      track: getTrackDiagnostics(player.queue.current),
+    });
+
+    try {
+      if (failureCount < RECOVERY_RESET_THRESHOLD && player.queue.current) {
+        debug(`[${guildId}] Recovery attempt #${failureCount}: skipping current track`);
+        player.skip();
+        return;
+      }
+
+      warn(`[${guildId}] Recovery attempt #${failureCount}: resetting player`);
+      await kazagumo.destroyPlayer(guildId);
+    } catch (err) {
+      debug(`[${guildId}] Recovery flow failed`, err);
+    }
+  };
+
   const options: ShoukakuOptions = {
     moveOnDisconnect: true,
     // Server-side session resume: NodeLink keeps player state alive for resumeTimeout
@@ -88,6 +220,14 @@ export function initKazagumo(client: Client): Kazagumo {
 
   kazagumo.on('playerStart', async (player, track) => {
     try {
+      clearRecoveryState(player.guildId);
+      debug(`[${player.guildId}] playerStart diagnostics`, {
+        playerState: player.state,
+        playing: player.playing,
+        paused: player.paused,
+        queueSize: player.queue.size,
+        track: getTrackDiagnostics(track),
+      });
       const parlantePlayer = playersManager.get(player.guildId);
       if (!parlantePlayer) return;
       parlantePlayer.cancelIdleTimer();
@@ -147,6 +287,7 @@ export function initKazagumo(client: Client): Kazagumo {
   });
   kazagumo.on('playerDestroy', async (player) => {
     try {
+      clearRecoveryState(player.guildId);
       const parlantePlayer = playersManager.get(player.guildId);
       if (!parlantePlayer) return;
 
@@ -194,6 +335,17 @@ export function initKazagumo(client: Client): Kazagumo {
         isSeekable,
         length,
       };
+
+      debug(`[${player.guildId}] playerClosed diagnostics`, {
+        code: data.code,
+        byRemote: data.byRemote,
+        snapshot,
+        playerState: player.state,
+        playing: player.playing,
+        paused: player.paused,
+        queueSize: player.queue.size,
+        track: getTrackDiagnostics(current),
+      });
 
       debug(
         `[${player.guildId}] playerClosed (code=${data.code}, byRemote=${data.byRemote}) — scheduling resume from ${snapshot.position}ms`,
@@ -259,6 +411,16 @@ export function initKazagumo(client: Client): Kazagumo {
       // a proxy since Shoukaku doesn't expose connection state directly here.
       const voiceReady = Boolean(kPlayer.voiceId);
       if (!voiceReady) {
+        debug(`[${guildId}] Resume voice readiness diagnostics`, {
+          attempt,
+          maxRetries: RECONNECT_RESUME_MAX_RETRIES,
+          voiceId: kPlayer.voiceId,
+          state: kPlayer.state,
+          playing: kPlayer.playing,
+          paused: kPlayer.paused,
+          queueSize: kPlayer.queue.size,
+          track: getTrackDiagnostics(current),
+        });
         if (attempt >= RECONNECT_RESUME_MAX_RETRIES) {
           warn(`[${guildId}] Resume: voice not ready after ${attempt} attempts, giving up`);
           return;
@@ -283,6 +445,13 @@ export function initKazagumo(client: Client): Kazagumo {
       // player.shoukaku.resume() replays the track using NodeLink's stored
       // player state (track, volume, filters) overridden with our position and
       // paused flag — no re-resolve, no queue mutation.
+      debug(`[${guildId}] Resume request diagnostics`, {
+        attempt,
+        nonce,
+        position,
+        paused: snapshot.paused,
+        track: getTrackDiagnostics(current),
+      });
       await kPlayer.shoukaku.resume({ position, paused: snapshot.paused });
     } catch (err) {
       debug(`[${guildId}] Resume attempt #${attempt} error`, err);
@@ -306,6 +475,15 @@ export function initKazagumo(client: Client): Kazagumo {
           ? (data as { exception?: { message?: string } }).exception?.message
           : undefined;
       warn(`[${player.guildId}] Player exception`, data);
+      debug(`[${player.guildId}] playerException diagnostics`, {
+        reason,
+        playerState: player.state,
+        playing: player.playing,
+        paused: player.paused,
+        queueSize: player.queue.size,
+        track: getTrackDiagnostics(player.queue.current),
+        rawData: data,
+      });
 
       const parlantePlayer = playersManager.get(player.guildId);
       if (parlantePlayer) {
@@ -318,6 +496,8 @@ export function initKazagumo(client: Client): Kazagumo {
           messages.player.trackLoadFailed(title ?? reason ?? 'Unknown Track'),
         );
       }
+
+      void recoverFromPlaybackFailure(player);
     } catch (err) {
       debug(`[${player.guildId}] Error in playerException handler`, err);
     }
@@ -325,6 +505,13 @@ export function initKazagumo(client: Client): Kazagumo {
   kazagumo.on('playerStuck', (player) => {
     try {
       warn(`[${player.guildId}] Player stuck`);
+      debug(`[${player.guildId}] playerStuck diagnostics`, {
+        playerState: player.state,
+        playing: player.playing,
+        paused: player.paused,
+        queueSize: player.queue.size,
+        track: getTrackDiagnostics(player.queue.current),
+      });
 
       const parlantePlayer = playersManager.get(player.guildId);
       if (parlantePlayer) {
@@ -332,6 +519,8 @@ export function initKazagumo(client: Client): Kazagumo {
         const title = (current as { title?: string } | null)?.title ?? 'Unknown Track';
         parlantePlayer.sendAutoDeleteMessage(typedClient, messages.player.trackLoadFailed(title));
       }
+
+      void recoverFromPlaybackFailure(player);
     } catch (err) {
       debug(`[${player.guildId}] Error in playerStuck handler`, err);
     }
@@ -343,11 +532,22 @@ export function initKazagumo(client: Client): Kazagumo {
         (track as { info?: { title?: string } }).info?.title ??
         'Unknown Track';
       warn(`[${player.guildId}] Resolve error for ${title}`, message);
+      debug(`[${player.guildId}] playerResolveError diagnostics`, {
+        message,
+        playerState: player.state,
+        playing: player.playing,
+        paused: player.paused,
+        queueSize: player.queue.size,
+        currentTrack: getTrackDiagnostics(player.queue.current),
+        failedTrack: getTrackDiagnostics(track),
+      });
 
       const parlantePlayer = playersManager.get(player.guildId);
       if (parlantePlayer) {
         parlantePlayer.sendAutoDeleteMessage(typedClient, messages.player.trackLoadFailed(title));
       }
+
+      void recoverFromPlaybackFailure(player);
     } catch (err) {
       debug(`[${player.guildId}] Error in playerResolveError handler`, err);
     }
