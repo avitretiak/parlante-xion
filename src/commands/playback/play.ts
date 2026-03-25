@@ -16,6 +16,7 @@ import { playersManager } from '#parlante/managers/players';
 import { getGuildSettings } from '#parlante/utils/config/get-guild-settings';
 import { truncate } from '#parlante/utils/general/string';
 import { prettyTime } from '#parlante/utils/general/time';
+import { isExplicitPlaylistUrl } from '#parlante/utils/general/url';
 import { debug } from '#parlante/utils/system/logger';
 
 // Cache autocomplete results to avoid hammering NodeLink on every keystroke
@@ -24,6 +25,20 @@ const autocompleteCache = new Map<
   { results: Array<{ name: string; value: string }>; expiresAt: number }
 >();
 const AUTOCOMPLETE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+const formatTrackAutocompleteValue = (track: {
+  uri?: string;
+  identifier?: string;
+  title?: string;
+  author?: string;
+  sourceName?: string;
+}) => {
+  if (track.uri) return track.uri;
+  if (track.identifier && track.sourceName === 'youtube') {
+    return `https://www.youtube.com/watch?v=${track.identifier}`;
+  }
+  return `${track.title ?? ''} ${track.author ?? ''}`.trim();
+};
 
 const playOptions = {
   query: createStringOption({
@@ -70,7 +85,7 @@ const playOptions = {
             ? messages.player.live
             : prettyTime(Math.floor((t.length ?? 0) / 1000));
           const name = `${truncate(t.title, 45)} (${dur}) - ${truncate(t.author ?? '', 30)}`;
-          return { name: name.slice(0, 100), value: t.uri ?? t.title };
+          return { name: name.slice(0, 100), value: formatTrackAutocompleteValue(t).slice(0, 100) };
         });
 
         autocompleteCache.set(query, {
@@ -134,7 +149,10 @@ export default class PlayCommand extends Command {
     const settings = await getGuildSettings(guildId);
 
     let tracks = result.tracks;
+    const allowPlaylistExpansion = isExplicitPlaylistUrl(query.trim());
     if (result.type === 'SEARCH' || result.type === 'TRACK') {
+      tracks = tracks.slice(0, 1);
+    } else if (result.type === 'PLAYLIST' && !allowPlaylistExpansion) {
       tracks = tracks.slice(0, 1);
     } else if (
       result.type === 'PLAYLIST' &&
@@ -143,6 +161,14 @@ export default class PlayCommand extends Command {
     ) {
       tracks = tracks.slice(0, settings.playlistLimit);
     }
+
+    debug(`[${guildId}] /play playlist expansion diagnostics`, {
+      query: query.trim(),
+      resultType: result.type,
+      allowPlaylistExpansion,
+      originalTracks: result.tracks.length,
+      queuedTracks: tracks.length,
+    });
 
     let kPlayer = kazagumo.players.get(guildId);
     if (!kPlayer) {
@@ -211,9 +237,9 @@ export default class PlayCommand extends Command {
       });
     }
 
-    const track = result.tracks[0]!;
+    const track = tracks[0]!;
 
-    if (result.tracks.length === 1 || result.type === 'TRACK' || result.type === 'SEARCH') {
+    if (tracks.length === 1 || result.type === 'TRACK' || result.type === 'SEARCH') {
       await ctx.editOrReply({
         content: messages.queue.addSuccess(track.title, immediate ?? false, skipCurrentTrack, ''),
         flags: MessageFlags.Ephemeral,
@@ -222,7 +248,7 @@ export default class PlayCommand extends Command {
       await ctx.editOrReply({
         content: messages.queue.addMultipleSuccess(
           result.playlistName ?? track.title,
-          result.tracks.length - 1,
+          tracks.length - 1,
           skipCurrentTrack,
           '',
         ),

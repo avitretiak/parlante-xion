@@ -17,6 +17,8 @@ import { searchTracks } from '#parlante/services/search';
 import { addToQueue } from '#parlante/services/queue-service';
 import { playersManager } from '#parlante/managers/players';
 import { getGuildSettings } from '#parlante/utils/config/get-guild-settings';
+import { isExplicitPlaylistUrl } from '#parlante/utils/general/url';
+import { debug } from '#parlante/utils/system/logger';
 import messages from '#parlante/utils/constants/messages';
 
 const useOptions = {
@@ -121,7 +123,12 @@ class UseFavoriteCommand extends SubCommand {
     const settings = await getGuildSettings(guildId);
 
     let tracks = result.tracks;
-    if (
+    const allowPlaylistExpansion = isExplicitPlaylistUrl(favorite.query);
+    if (result.type === 'SEARCH' || result.type === 'TRACK') {
+      tracks = tracks.slice(0, 1);
+    } else if (result.type === 'PLAYLIST' && !allowPlaylistExpansion) {
+      tracks = tracks.slice(0, 1);
+    } else if (
       result.type === 'PLAYLIST' &&
       settings.playlistLimit &&
       tracks.length > settings.playlistLimit
@@ -129,14 +136,24 @@ class UseFavoriteCommand extends SubCommand {
       tracks = tracks.slice(0, settings.playlistLimit);
     }
 
+    debug(`[${guildId}] /favorites use playlist expansion diagnostics`, {
+      favoriteName: favorite.name,
+      query: favorite.query,
+      resultType: result.type,
+      allowPlaylistExpansion,
+      originalTracks: result.tracks.length,
+      queuedTracks: tracks.length,
+    });
+
     let kPlayer = kazagumo.players.get(guildId);
     if (!kPlayer) {
+      const shardId = ctx.client.gateway.calculateShardId(guildId);
       kPlayer = await kazagumo.createPlayer({
         guildId,
         voiceId,
         textId: ctx.channelId!,
         deaf: true,
-        shardId: 0,
+        shardId,
       });
 
       playersManager.create(guildId, kPlayer, ctx.channelId!);
@@ -162,8 +179,8 @@ class UseFavoriteCommand extends SubCommand {
       await kPlayer.play();
     }
 
-    const track = result.tracks[0]!;
-    if (result.tracks.length === 1 || result.type === 'TRACK' || result.type === 'SEARCH') {
+    const track = tracks[0]!;
+    if (tracks.length === 1 || result.type === 'TRACK' || result.type === 'SEARCH') {
       await ctx.editOrReply({
         content: messages.queue.addSuccess(track.title, immediate, skip, ''),
         flags: MessageFlags.Ephemeral,
@@ -172,7 +189,7 @@ class UseFavoriteCommand extends SubCommand {
       await ctx.editOrReply({
         content: messages.queue.addMultipleSuccess(
           result.playlistName ?? track.title,
-          result.tracks.length - 1,
+          tracks.length - 1,
           skip,
           '',
         ),

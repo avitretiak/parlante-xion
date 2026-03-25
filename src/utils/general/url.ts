@@ -36,3 +36,31 @@ export const cleanUrl = (url: string) => {
     return url;
   }
 };
+
+export const isExplicitPlaylistUrl = (input: string): boolean => {
+  try {
+    const url = new URL(input);
+    const host = url.hostname.toLowerCase();
+    const pathname = url.pathname.toLowerCase();
+
+    const isYouTubeHost =
+      host === 'youtube.com' || host === 'youtu.be' || host.endsWith('.youtube.com');
+    if (isYouTubeHost) {
+      return pathname === '/playlist';
+    }
+
+    const isSpotifyHost = host === 'spotify.com' || host.endsWith('.spotify.com');
+    if (isSpotifyHost) {
+      return pathname.startsWith('/playlist/');
+    }
+
+    const isSoundCloudHost = host === 'soundcloud.com' || host.endsWith('.soundcloud.com');
+    if (isSoundCloudHost) {
+      return pathname.includes('/sets/');
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+};
