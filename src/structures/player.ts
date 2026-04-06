@@ -63,11 +63,15 @@ export class ParlantePlayer {
   private resumeNonce = 0;
 
   constructor(
-    public readonly kazagumoPlayer: KazagumoPlayer,
+    public kazagumoPlayer: KazagumoPlayer,
     public readonly guildId: string,
     textChannelId: string,
   ) {
     this.textChannelId = textChannelId;
+  }
+
+  setKazagumoPlayer(kazagumoPlayer: KazagumoPlayer): void {
+    this.kazagumoPlayer = kazagumoPlayer;
   }
 
   // Called from playerStart so position tracking is always scoped to the

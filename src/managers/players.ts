@@ -11,6 +11,7 @@ class PlayersManager {
   create(guildId: string, kazagumoPlayer: KazagumoPlayer, textChannelId: string): ParlantePlayer {
     const existing = this.players.get(guildId);
     if (existing) {
+      existing.setKazagumoPlayer(kazagumoPlayer);
       existing.textChannelId = textChannelId;
       return existing;
     }
