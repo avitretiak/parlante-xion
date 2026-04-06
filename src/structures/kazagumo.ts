@@ -4,7 +4,7 @@ import { PlayerState } from 'kazagumo';
 import type { KazagumoPlayer } from 'kazagumo';
 import { Connectors, type NodeOption, type ShoukakuOptions } from 'shoukaku';
 import { playersManager } from '../managers/players';
-import type { ResumeSnapshot } from '../structures/player';
+import type { ParlantePlayer, ResumeSnapshot } from '../structures/player';
 import { debug, info, warn, error as logError } from '#parlante/utils/system/logger';
 import { getGuildSettings } from '#parlante/utils/config/get-guild-settings';
 import messages from '#parlante/utils/constants/messages';
@@ -14,9 +14,10 @@ const DEFAULT_NODELINK_URL = 'localhost:2333';
 // How long to wait before attempting to replay after a voice WS close.
 // Chosen to be longer than Discord's typical voice reconnect handshake (~1-2s)
 // but short enough not to noticeably stall playback.
-const RECONNECT_RESUME_DELAY_MS = 3_000;
+const RECONNECT_RESUME_DELAY_MS = 5_000;
+const RECONNECT_RESUME_MAX_DELAY_MS = 30_000;
 // Maximum retry attempts before giving up on auto-resume.
-const RECONNECT_RESUME_MAX_RETRIES = 3;
+const RECONNECT_RESUME_MAX_RETRIES = 6;
 const RECOVERY_FAILURE_RESET_MS = 120_000;
 const RECOVERY_RESET_THRESHOLD = 2;
 const RECOVERY_LOCK_MS = 5_000;
@@ -60,7 +61,42 @@ const isTransientVoiceException = (context?: RecoveryContext): boolean => {
   if (!context || context.trigger !== 'playerException') return false;
   const reason = context.reason ?? '';
   const cause = context.cause ?? '';
-  return cause === 'VOICE_CONNECTION_RESET' || reason.includes('ECONNRESET');
+  const combined = `${reason} ${cause}`.toLowerCase();
+  return (
+    cause === 'VOICE_CONNECTION_RESET' ||
+    combined.includes('econnreset') ||
+    combined.includes('alreadyingroup') ||
+    combined.includes('failed to set external sender')
+  );
+};
+
+const buildResumeSnapshot = (
+  player: KazagumoPlayer,
+  parlantePlayer: ParlantePlayer,
+): ResumeSnapshot | null => {
+  const current = player.queue.current;
+  if (!current) return null;
+  if (player.state === PlayerState.DESTROYING || player.state === PlayerState.DESTROYED) {
+    return null;
+  }
+
+  const trackId =
+    (current as { identifier?: string }).identifier ??
+    (current as { info?: { identifier?: string } }).info?.identifier ??
+    (current as { track?: string }).track ??
+    '';
+  const isStream = (current as { isStream?: boolean }).isStream ?? false;
+  const isSeekable = (current as { isSeekable?: boolean }).isSeekable ?? true;
+  const length = (current as { length?: number }).length ?? 0;
+
+  return {
+    trackId,
+    position: isStream || !isSeekable ? 0 : parlantePlayer.lastKnownPosition,
+    paused: player.paused,
+    isStream,
+    isSeekable,
+    length,
+  };
 };
 
 const getPlayerExceptionDiagnostics = (data: unknown): PlayerExceptionDiagnostics => {
@@ -188,12 +224,20 @@ export function initKazagumo(client: Client): Kazagumo {
     return state.consecutiveFailures;
   };
 
-  const scheduleRecoveryUnlock = (guildId: string): void => {
+  const scheduleRecoveryUnlock = (guildId: string, delayMs = RECOVERY_LOCK_MS): void => {
     setTimeout(() => {
       const state = recoveryStates.get(guildId);
       if (!state) return;
       state.recovering = false;
-    }, RECOVERY_LOCK_MS);
+    }, delayMs);
+  };
+
+  const getResumeDelayMs = (attempt: number): number => {
+    const exponent = Math.max(0, attempt - 1);
+    const baseDelay = RECONNECT_RESUME_DELAY_MS * Math.pow(2, exponent);
+    const cappedDelay = Math.min(baseDelay, RECONNECT_RESUME_MAX_DELAY_MS);
+    const jitter = Math.floor(Math.random() * 1000);
+    return cappedDelay + jitter;
   };
 
   const recoverFromPlaybackFailure = async (
@@ -210,7 +254,6 @@ export function initKazagumo(client: Client): Kazagumo {
 
     const failureCount = registerRecoveryFailure(guildId);
     state.recovering = true;
-    scheduleRecoveryUnlock(guildId);
 
     debug(`[${guildId}] Recovery diagnostics`, {
       trigger: context?.trigger,
@@ -233,11 +276,13 @@ export function initKazagumo(client: Client): Kazagumo {
           warn(
             `[${guildId}] Recovery attempt #${failureCount}: transient voice exception detected (${context?.cause ?? 'unknown'}), waiting for reconnect instead of skipping`,
           );
+          scheduleRecoveryUnlock(guildId, getResumeDelayMs(1));
           return;
         }
         debug(
           `[${guildId}] Recovery attempt #${failureCount}: skipping current track (${context?.trigger ?? 'unknown'})`,
         );
+        scheduleRecoveryUnlock(guildId);
         player.skip();
         return;
       }
@@ -245,8 +290,10 @@ export function initKazagumo(client: Client): Kazagumo {
       warn(
         `[${guildId}] Recovery attempt #${failureCount}: resetting player (${context?.trigger ?? 'unknown'})`,
       );
+      scheduleRecoveryUnlock(guildId);
       await kazagumo.destroyPlayer(guildId);
     } catch (err) {
+      scheduleRecoveryUnlock(guildId);
       debug(`[${guildId}] Recovery flow failed`, err);
     }
   };
@@ -386,34 +433,11 @@ export function initKazagumo(client: Client): Kazagumo {
       const parlantePlayer = playersManager.get(player.guildId);
       if (!parlantePlayer) return;
 
-      const current = player.queue.current;
-      if (!current) return;
-
-      // Snapshot everything we need before any async gap. If the player is
-      // already tearing down, bail immediately.
-      if (player.state === PlayerState.DESTROYING || player.state === PlayerState.DESTROYED) {
-        debug(`[${player.guildId}] playerClosed — player already destroying, skipping resume`);
+      const snapshot = buildResumeSnapshot(player, parlantePlayer);
+      if (!snapshot) {
+        debug(`[${player.guildId}] playerClosed — no snapshot available, skipping resume`);
         return;
       }
-
-      const trackId =
-        (current as { identifier?: string }).identifier ??
-        (current as { info?: { identifier?: string } }).info?.identifier ??
-        (current as { track?: string }).track ??
-        '';
-      const isStream = (current as { isStream?: boolean }).isStream ?? false;
-      const isSeekable = (current as { isSeekable?: boolean }).isSeekable ?? true;
-      const length = (current as { length?: number }).length ?? 0;
-      const snapshot: ResumeSnapshot = {
-        trackId,
-        // If the track is not seekable or is a stream, resume from 0 —
-        // no point trying to seek into a live stream.
-        position: isStream || !isSeekable ? 0 : parlantePlayer.lastKnownPosition,
-        paused: player.paused,
-        isStream,
-        isSeekable,
-        length,
-      };
 
       debug(`[${player.guildId}] playerClosed diagnostics`, {
         code: data.code,
@@ -423,7 +447,7 @@ export function initKazagumo(client: Client): Kazagumo {
         playing: player.playing,
         paused: player.paused,
         queueSize: player.queue.size,
-        track: getTrackDiagnostics(current),
+        track: getTrackDiagnostics(player.queue.current),
       });
 
       debug(
@@ -432,7 +456,7 @@ export function initKazagumo(client: Client): Kazagumo {
 
       // Schedule the single-flight resume loop. scheduleResumeTimer cancels
       // any prior pending resume before creating the new one.
-      const nonce = parlantePlayer.scheduleResumeTimer(RECONNECT_RESUME_DELAY_MS, () => {
+      const nonce = parlantePlayer.scheduleResumeTimer(getResumeDelayMs(1), () => {
         void attemptResume(player.guildId, nonce, snapshot, 1);
       });
     } catch (err) {
@@ -505,7 +529,7 @@ export function initKazagumo(client: Client): Kazagumo {
           return;
         }
         debug(`[${guildId}] Resume attempt #${attempt} — voice not ready, retrying`);
-        const retryNonce = parlantePlayer.scheduleResumeTimer(RECONNECT_RESUME_DELAY_MS, () => {
+        const retryNonce = parlantePlayer.scheduleResumeTimer(getResumeDelayMs(attempt + 1), () => {
           void attemptResume(guildId, retryNonce, snapshot, attempt + 1);
         });
         return;
@@ -541,7 +565,7 @@ export function initKazagumo(client: Client): Kazagumo {
         warn(`[${guildId}] Resume: failed after ${attempt} attempts, giving up`);
         return;
       }
-      const retryNonce = parlantePlayer.scheduleResumeTimer(RECONNECT_RESUME_DELAY_MS, () => {
+      const retryNonce = parlantePlayer.scheduleResumeTimer(getResumeDelayMs(attempt + 1), () => {
         void attemptResume(guildId, retryNonce, snapshot, attempt + 1);
       });
     }
@@ -553,6 +577,13 @@ export function initKazagumo(client: Client): Kazagumo {
       const reason = details.message;
       const causePart = details.cause ? ` (cause: ${details.cause})` : '';
       const severityPart = details.severity ? ` [${details.severity}]` : '';
+      const recoveryContext: RecoveryContext = {
+        trigger: 'playerException',
+        reason,
+        cause: details.cause,
+        severity: details.severity,
+      };
+      const transient = isTransientVoiceException(recoveryContext);
       warn(
         `[${player.guildId}] Player exception${severityPart}: ${reason ?? 'Unknown'}${causePart}`,
       );
@@ -571,22 +602,27 @@ export function initKazagumo(client: Client): Kazagumo {
 
       const parlantePlayer = playersManager.get(player.guildId);
       if (parlantePlayer) {
-        const current = player.queue.current;
-        const title =
-          (current as { title?: string } | null)?.title ??
-          (current as { info?: { title?: string } } | null)?.info?.title;
-        parlantePlayer.sendAutoDeleteMessage(
-          typedClient,
-          messages.player.trackLoadFailed(title ?? reason ?? 'Unknown Track'),
-        );
+        if (!transient) {
+          const current = player.queue.current;
+          const title =
+            (current as { title?: string } | null)?.title ??
+            (current as { info?: { title?: string } } | null)?.info?.title;
+          parlantePlayer.sendAutoDeleteMessage(
+            typedClient,
+            messages.player.trackLoadFailed(title ?? reason ?? 'Unknown Track'),
+          );
+        } else {
+          const snapshot = buildResumeSnapshot(player, parlantePlayer);
+          if (snapshot) {
+            debug(`[${player.guildId}] Transient exception — scheduling resume recovery`);
+            const nonce = parlantePlayer.scheduleResumeTimer(getResumeDelayMs(1), () => {
+              void attemptResume(player.guildId, nonce, snapshot, 1);
+            });
+          }
+        }
       }
 
-      void recoverFromPlaybackFailure(player, {
-        trigger: 'playerException',
-        reason,
-        cause: details.cause,
-        severity: details.severity,
-      });
+      void recoverFromPlaybackFailure(player, recoveryContext);
     } catch (err) {
       debug(`[${player.guildId}] Error in playerException handler`, err);
     }
