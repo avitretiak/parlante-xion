@@ -90,7 +90,15 @@ client.events.onFail = (event, err) => {
 };
 
 process.on('unhandledRejection', (reason) => {
-  error('Unhandled promise rejection (caught to prevent crash)', reason);
+  if (reason instanceof Error) {
+    error('Unhandled promise rejection (caught to prevent crash)', reason);
+    return;
+  }
+
+  error('Unhandled promise rejection (caught to prevent crash)', {
+    reasonType: typeof reason,
+    reason,
+  });
 });
 
 // ─── Core lifecycle functions ──────────────────────────────────────────────

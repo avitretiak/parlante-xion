@@ -37,6 +37,59 @@ type TrackDiagnostics = {
   length?: number;
 };
 
+type PlayerExceptionClientError = {
+  client?: string;
+  message?: string;
+};
+
+type PlayerExceptionDiagnostics = {
+  message?: string;
+  severity?: string;
+  cause?: string;
+  clientErrors: PlayerExceptionClientError[];
+};
+
+type RecoveryContext = {
+  trigger: 'playerException' | 'playerStuck' | 'playerResolveError';
+  reason?: string;
+};
+
+const getPlayerExceptionDiagnostics = (data: unknown): PlayerExceptionDiagnostics => {
+  if (!data || typeof data !== 'object') {
+    return { clientErrors: [] };
+  }
+
+  const exception = (data as { exception?: unknown }).exception;
+  if (!exception || typeof exception !== 'object') {
+    return { clientErrors: [] };
+  }
+
+  const parsed = exception as {
+    message?: string;
+    severity?: string;
+    cause?: string;
+    errors?: unknown;
+  };
+
+  const clientErrors = Array.isArray(parsed.errors)
+    ? parsed.errors
+        .filter((error): error is PlayerExceptionClientError =>
+          Boolean(error && typeof error === 'object'),
+        )
+        .map((error) => ({
+          client: error.client,
+          message: error.message,
+        }))
+    : [];
+
+  return {
+    message: parsed.message,
+    severity: parsed.severity,
+    cause: parsed.cause,
+    clientErrors,
+  };
+};
+
 const getTrackDiagnostics = (track: unknown): TrackDiagnostics => {
   if (!track || typeof track !== 'object') return {};
   const t = track as {
@@ -134,7 +187,10 @@ export function initKazagumo(client: Client): Kazagumo {
     }, RECOVERY_LOCK_MS);
   };
 
-  const recoverFromPlaybackFailure = async (player: KazagumoPlayer): Promise<void> => {
+  const recoverFromPlaybackFailure = async (
+    player: KazagumoPlayer,
+    context?: RecoveryContext,
+  ): Promise<void> => {
     const guildId = player.guildId;
     const state = getOrCreateRecoveryState(guildId);
 
@@ -148,6 +204,8 @@ export function initKazagumo(client: Client): Kazagumo {
     scheduleRecoveryUnlock(guildId);
 
     debug(`[${guildId}] Recovery diagnostics`, {
+      trigger: context?.trigger,
+      reason: context?.reason,
       failureCount,
       threshold: RECOVERY_RESET_THRESHOLD,
       playerState: player.state,
@@ -160,12 +218,16 @@ export function initKazagumo(client: Client): Kazagumo {
 
     try {
       if (failureCount < RECOVERY_RESET_THRESHOLD && player.queue.current) {
-        debug(`[${guildId}] Recovery attempt #${failureCount}: skipping current track`);
+        debug(
+          `[${guildId}] Recovery attempt #${failureCount}: skipping current track (${context?.trigger ?? 'unknown'})`,
+        );
         player.skip();
         return;
       }
 
-      warn(`[${guildId}] Recovery attempt #${failureCount}: resetting player`);
+      warn(
+        `[${guildId}] Recovery attempt #${failureCount}: resetting player (${context?.trigger ?? 'unknown'})`,
+      );
       await kazagumo.destroyPlayer(guildId);
     } catch (err) {
       debug(`[${guildId}] Recovery flow failed`, err);
@@ -470,13 +532,18 @@ export function initKazagumo(client: Client): Kazagumo {
 
   kazagumo.on('playerException', (player, data) => {
     try {
-      const reason =
-        data && typeof data === 'object' && 'exception' in data
-          ? (data as { exception?: { message?: string } }).exception?.message
-          : undefined;
-      warn(`[${player.guildId}] Player exception`, data);
+      const details = getPlayerExceptionDiagnostics(data);
+      const reason = details.message;
+      const causePart = details.cause ? ` (cause: ${details.cause})` : '';
+      const severityPart = details.severity ? ` [${details.severity}]` : '';
+      warn(
+        `[${player.guildId}] Player exception${severityPart}: ${reason ?? 'Unknown'}${causePart}`,
+      );
       debug(`[${player.guildId}] playerException diagnostics`, {
         reason,
+        severity: details.severity,
+        cause: details.cause,
+        clientErrors: details.clientErrors,
         playerState: player.state,
         playing: player.playing,
         paused: player.paused,
@@ -497,7 +564,10 @@ export function initKazagumo(client: Client): Kazagumo {
         );
       }
 
-      void recoverFromPlaybackFailure(player);
+      void recoverFromPlaybackFailure(player, {
+        trigger: 'playerException',
+        reason,
+      });
     } catch (err) {
       debug(`[${player.guildId}] Error in playerException handler`, err);
     }
@@ -520,7 +590,9 @@ export function initKazagumo(client: Client): Kazagumo {
         parlantePlayer.sendAutoDeleteMessage(typedClient, messages.player.trackLoadFailed(title));
       }
 
-      void recoverFromPlaybackFailure(player);
+      void recoverFromPlaybackFailure(player, {
+        trigger: 'playerStuck',
+      });
     } catch (err) {
       debug(`[${player.guildId}] Error in playerStuck handler`, err);
     }
@@ -547,7 +619,10 @@ export function initKazagumo(client: Client): Kazagumo {
         parlantePlayer.sendAutoDeleteMessage(typedClient, messages.player.trackLoadFailed(title));
       }
 
-      void recoverFromPlaybackFailure(player);
+      void recoverFromPlaybackFailure(player, {
+        trigger: 'playerResolveError',
+        reason: message,
+      });
     } catch (err) {
       debug(`[${player.guildId}] Error in playerResolveError handler`, err);
     }
