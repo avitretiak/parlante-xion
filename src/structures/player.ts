@@ -6,6 +6,7 @@ import { buildNowPlayingEmbed } from '#parlante/utils/player/build-now-playing-e
 import { debug, warn } from '#parlante/utils/system/logger';
 import {
   addMixLayer as mixerAdd,
+  deleteMixLayer,
   deleteAllMixLayers,
   listMixLayers,
 } from '#parlante/services/mixer';
@@ -14,13 +15,15 @@ const EMBED_DEBOUNCE_MS = 5000;
 const MESSAGE_REPLACEMENT_THRESHOLD_MS = 45 * 60 * 1000; // 45 minutes
 const EDIT_FAILURE_COOLDOWN_MS = 15_000; // 15 seconds
 const AUTO_DELETE_DELAY_MS = 10_000; // 10 seconds
-const MIX_LAYER_SAFETY_TIMEOUT_MS = 30_000;
 const MIX_LAYER_POLL_INTERVAL_MS = 2_000;
 const MIX_LAYER_POLL_MISS_THRESHOLD = 3;
+const MIX_LAYER_MIN_TIMEOUT_MS = 5_000;
+const MIX_LAYER_MAX_TIMEOUT_MS = 30_000;
 
 type QueuedMixLayer = {
   encodedTrack: string;
   volume: number;
+  timeoutMs: number;
 };
 
 type ActiveMixHandle = {
@@ -259,8 +262,12 @@ export class ParlantePlayer {
       .catch((err) => debug('Failed to send auto-delete message', err));
   }
 
-  addMixLayer(encodedTrack: string, volume: number): boolean {
-    this.ttsQueue.push({ encodedTrack, volume });
+  addMixLayer(encodedTrack: string, volume: number, timeoutMs = MIX_LAYER_MAX_TIMEOUT_MS): boolean {
+    const boundedTimeout = Math.min(
+      MIX_LAYER_MAX_TIMEOUT_MS,
+      Math.max(MIX_LAYER_MIN_TIMEOUT_MS, timeoutMs),
+    );
+    this.ttsQueue.push({ encodedTrack, volume, timeoutMs: boundedTimeout });
     if (!this.ttsPlaying) {
       this.playNextTts();
     }
@@ -314,10 +321,10 @@ export class ParlantePlayer {
     if (!next) return;
 
     this.ttsPlaying = true;
-    this.dispatchMixLayer(next.encodedTrack, next.volume);
+    this.dispatchMixLayer(next.encodedTrack, next.volume, next.timeoutMs);
   }
 
-  private dispatchMixLayer(encodedTrack: string, volume: number): void {
+  private dispatchMixLayer(encodedTrack: string, volume: number, timeoutMs: number): void {
     const sessionId = this.kazagumoPlayer.shoukaku.node.sessionId;
     if (!sessionId) {
       warn(`[${this.guildId}] No session ID available for mix layer`);
@@ -344,7 +351,7 @@ export class ParlantePlayer {
         const mixId = layer.id;
         const timeout = setTimeout(() => {
           this.finishMixLayer(mixId, 'safety-timeout');
-        }, MIX_LAYER_SAFETY_TIMEOUT_MS);
+        }, timeoutMs);
 
         let pollInFlight = false;
         let consecutiveMisses = 0;
@@ -407,6 +414,13 @@ export class ParlantePlayer {
       clearInterval(handle.poller);
     }
     this.activeMixes.delete(mixId);
+
+    if (reason !== 'event') {
+      const sessionId = this.kazagumoPlayer.shoukaku.node.sessionId;
+      if (sessionId) {
+        void deleteMixLayer(sessionId, this.guildId, mixId);
+      }
+    }
 
     debug(`[${this.guildId}] Mix layer ${mixId} finished (${reason})`);
     this.ttsPlaying = false;

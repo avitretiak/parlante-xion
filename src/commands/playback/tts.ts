@@ -13,6 +13,9 @@ import { playersManager } from '#parlante/managers/players';
 
 const TTS_VOICE = 'Mateo';
 const TTS_MIX_VOLUME = 1.0;
+const TTS_MIN_TIMEOUT_MS = 5_000;
+const TTS_MAX_TIMEOUT_MS = 30_000;
+const TTS_TIMEOUT_BUFFER_MS = 4_000;
 
 const ttsOptions = {
   message: createStringOption({
@@ -72,7 +75,18 @@ export default class TtsCommand extends Command {
       return;
     }
 
-    const success = await parlantePlayer.addMixLayer(result.data.encoded, TTS_MIX_VOLUME);
+    const ttsLengthMs =
+      (result.data as { info?: { length?: number } }).info?.length ?? TTS_MIN_TIMEOUT_MS;
+    const timeoutMs = Math.min(
+      TTS_MAX_TIMEOUT_MS,
+      Math.max(TTS_MIN_TIMEOUT_MS, ttsLengthMs + TTS_TIMEOUT_BUFFER_MS),
+    );
+
+    const success = await parlantePlayer.addMixLayer(
+      result.data.encoded,
+      TTS_MIX_VOLUME,
+      timeoutMs,
+    );
     if (!success) {
       await ctx.editOrReply({
         content: messages.error.commandFailed,
