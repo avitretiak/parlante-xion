@@ -170,6 +170,20 @@ export default class PlayCommand extends Command {
       queuedTracks: tracks.length,
     });
 
+    if (tracks.length === 0) {
+      debug(`[${guildId}] /play aborted after expansion diagnostics`, {
+        query: query.trim(),
+        resultType: result.type,
+        playlistLimit: settings.playlistLimit,
+        originalTracks: result.tracks.length,
+      });
+      await ctx.editOrReply({
+        content: messages.error.noSongsFound,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
     let kPlayer = kazagumo.players.get(guildId);
     if (!kPlayer) {
       const shardId = ctx.client.gateway.calculateShardId(guildId);

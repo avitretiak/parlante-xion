@@ -52,6 +52,15 @@ type PlayerExceptionDiagnostics = {
 type RecoveryContext = {
   trigger: 'playerException' | 'playerStuck' | 'playerResolveError';
   reason?: string;
+  cause?: string;
+  severity?: string;
+};
+
+const isTransientVoiceException = (context?: RecoveryContext): boolean => {
+  if (!context || context.trigger !== 'playerException') return false;
+  const reason = context.reason ?? '';
+  const cause = context.cause ?? '';
+  return cause === 'VOICE_CONNECTION_RESET' || reason.includes('ECONNRESET');
 };
 
 const getPlayerExceptionDiagnostics = (data: unknown): PlayerExceptionDiagnostics => {
@@ -206,6 +215,8 @@ export function initKazagumo(client: Client): Kazagumo {
     debug(`[${guildId}] Recovery diagnostics`, {
       trigger: context?.trigger,
       reason: context?.reason,
+      cause: context?.cause,
+      severity: context?.severity,
       failureCount,
       threshold: RECOVERY_RESET_THRESHOLD,
       playerState: player.state,
@@ -218,6 +229,12 @@ export function initKazagumo(client: Client): Kazagumo {
 
     try {
       if (failureCount < RECOVERY_RESET_THRESHOLD && player.queue.current) {
+        if (isTransientVoiceException(context)) {
+          warn(
+            `[${guildId}] Recovery attempt #${failureCount}: transient voice exception detected (${context?.cause ?? 'unknown'}), waiting for reconnect instead of skipping`,
+          );
+          return;
+        }
         debug(
           `[${guildId}] Recovery attempt #${failureCount}: skipping current track (${context?.trigger ?? 'unknown'})`,
         );
@@ -567,6 +584,8 @@ export function initKazagumo(client: Client): Kazagumo {
       void recoverFromPlaybackFailure(player, {
         trigger: 'playerException',
         reason,
+        cause: details.cause,
+        severity: details.severity,
       });
     } catch (err) {
       debug(`[${player.guildId}] Error in playerException handler`, err);

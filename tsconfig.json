@@ -9,6 +9,7 @@
     /* Modules */
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "types": ["bun", "node"],
     "resolveJsonModule": true,
     "allowImportingTsExtensions": false,
     "esModuleInterop": true,
@@ -18,7 +19,6 @@
     "sourceMap": false,
     "outDir": "./dist",
     "noEmit": false,
-    "downlevelIteration": false,
     "stripInternal": true,
     "preserveConstEnums": true,
 
@@ -39,7 +39,6 @@
     "noErrorTruncation": true,
 
     /* Path Mapping */
-    "baseUrl": ".",
     "rootDir": "./src",
     "paths": {
       "#parlante/config": ["./src/services/config.ts"],
