@@ -20,6 +20,7 @@ const RECONNECT_RESUME_MAX_DELAY_MS = 30_000;
 const RECONNECT_RESUME_MAX_RETRIES = 6;
 const RECOVERY_FAILURE_RESET_MS = 120_000;
 const RECOVERY_RESET_THRESHOLD = 2;
+const STUCK_RECOVERY_RESET_THRESHOLD = 7;
 const RECOVERY_LOCK_MS = 5_000;
 
 type RecoveryState = {
@@ -261,7 +262,10 @@ export function initKazagumo(client: Client): Kazagumo {
       cause: context?.cause,
       severity: context?.severity,
       failureCount,
-      threshold: RECOVERY_RESET_THRESHOLD,
+      threshold:
+        context?.trigger === 'playerStuck'
+          ? STUCK_RECOVERY_RESET_THRESHOLD
+          : RECOVERY_RESET_THRESHOLD,
       playerState: player.state,
       playing: player.playing,
       paused: player.paused,
@@ -271,7 +275,22 @@ export function initKazagumo(client: Client): Kazagumo {
     });
 
     try {
-      if (failureCount < RECOVERY_RESET_THRESHOLD && player.queue.current) {
+      const resetThreshold =
+        context?.trigger === 'playerStuck'
+          ? STUCK_RECOVERY_RESET_THRESHOLD
+          : RECOVERY_RESET_THRESHOLD;
+
+      if (failureCount < resetThreshold && player.queue.current) {
+        if (context?.trigger === 'playerStuck') {
+          const backoffAttempt = Math.min(failureCount, RECONNECT_RESUME_MAX_RETRIES);
+          const unlockDelay = getResumeDelayMs(backoffAttempt);
+          warn(
+            `[${guildId}] Recovery attempt #${failureCount}: player is stuck but keeping current track while NodeLink retries internally`,
+          );
+          scheduleRecoveryUnlock(guildId, unlockDelay);
+          return;
+        }
+
         if (isTransientVoiceException(context)) {
           warn(
             `[${guildId}] Recovery attempt #${failureCount}: transient voice exception detected (${context?.cause ?? 'unknown'}), waiting for reconnect instead of skipping`,
@@ -640,9 +659,12 @@ export function initKazagumo(client: Client): Kazagumo {
 
       const parlantePlayer = playersManager.get(player.guildId);
       if (parlantePlayer) {
-        const current = player.queue.current;
-        const title = (current as { title?: string } | null)?.title ?? 'Unknown Track';
-        parlantePlayer.sendAutoDeleteMessage(typedClient, messages.player.trackLoadFailed(title));
+        const snapshot = buildResumeSnapshot(player, parlantePlayer);
+        if (snapshot) {
+          const nonce = parlantePlayer.scheduleResumeTimer(getResumeDelayMs(1), () => {
+            void attemptResume(player.guildId, nonce, snapshot, 1);
+          });
+        }
       }
 
       void recoverFromPlaybackFailure(player, {
