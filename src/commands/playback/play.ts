@@ -184,6 +184,12 @@ export default class PlayCommand extends Command {
       return;
     }
 
+    const firstTrack = tracks[0];
+    const firstTrackTitle =
+      firstTrack?.title ??
+      (firstTrack as { info?: { title?: string } } | undefined)?.info?.title ??
+      'Unknown Track';
+
     let kPlayer = kazagumo.players.get(guildId);
     if (!kPlayer) {
       const shardId = ctx.client.gateway.calculateShardId(guildId);
@@ -251,17 +257,20 @@ export default class PlayCommand extends Command {
       });
     }
 
-    const track = tracks[0]!;
-
     if (tracks.length === 1 || result.type === 'TRACK' || result.type === 'SEARCH') {
       await ctx.editOrReply({
-        content: messages.queue.addSuccess(track.title, immediate ?? false, skipCurrentTrack, ''),
+        content: messages.queue.addSuccess(
+          firstTrackTitle,
+          immediate ?? false,
+          skipCurrentTrack,
+          '',
+        ),
         flags: MessageFlags.Ephemeral,
       });
     } else {
       await ctx.editOrReply({
         content: messages.queue.addMultipleSuccess(
-          result.playlistName ?? track.title,
+          result.playlistName ?? firstTrackTitle,
           tracks.length - 1,
           skipCurrentTrack,
           '',

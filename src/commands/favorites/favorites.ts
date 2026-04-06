@@ -21,6 +21,9 @@ import { isExplicitPlaylistUrl } from '#parlante/utils/general/url';
 import { debug } from '#parlante/utils/system/logger';
 import messages from '#parlante/utils/constants/messages';
 
+const getTrackTitle = (track: { title?: string; info?: { title?: string } } | null | undefined) =>
+  track?.title ?? track?.info?.title ?? 'Unknown Track';
+
 const useOptions = {
   name: createStringOption({
     description: messages.favorites.use.name,
@@ -179,16 +182,17 @@ class UseFavoriteCommand extends SubCommand {
       await kPlayer.play();
     }
 
-    const track = tracks[0]!;
+    const track = tracks[0];
+    const trackTitle = getTrackTitle(track);
     if (tracks.length === 1 || result.type === 'TRACK' || result.type === 'SEARCH') {
       await ctx.editOrReply({
-        content: messages.queue.addSuccess(track.title, immediate, skip, ''),
+        content: messages.queue.addSuccess(trackTitle, immediate, skip, ''),
         flags: MessageFlags.Ephemeral,
       });
     } else {
       await ctx.editOrReply({
         content: messages.queue.addMultipleSuccess(
-          result.playlistName ?? track.title,
+          result.playlistName ?? trackTitle,
           tracks.length - 1,
           skip,
           '',

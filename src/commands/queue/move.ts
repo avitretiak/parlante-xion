@@ -9,6 +9,9 @@ import {
 import { MessageFlags } from 'seyfert/lib/types';
 import messages from '#parlante/utils/constants/messages';
 
+const getTrackTitle = (track: { title?: string; info?: { title?: string } } | null | undefined) =>
+  track?.title ?? track?.info?.title ?? 'Unknown Track';
+
 const moveOptions = {
   from: createIntegerOption({
     description: messages.commands.move.from,
@@ -58,7 +61,7 @@ export default class MoveCommand extends Command {
 
     kPlayer.queue.splice(to - 1, 0, track);
     await ctx.write({
-      content: messages.queue.moved(track.title, to),
+      content: messages.queue.moved(getTrackTitle(track), to),
       flags: MessageFlags.Ephemeral,
     });
   }

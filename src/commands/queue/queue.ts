@@ -10,6 +10,9 @@ import { MessageFlags } from 'seyfert/lib/types';
 import messages from '#parlante/utils/constants/messages';
 import { getGuildSettings } from '#parlante/utils/config/get-guild-settings';
 
+const getTrackTitle = (track: { title?: string; info?: { title?: string } } | null | undefined) =>
+  track?.title ?? track?.info?.title ?? 'Unknown Track';
+
 const queueOptions = {
   page: createIntegerOption({
     description: messages.commands.queue.page,
@@ -57,10 +60,10 @@ export default class QueueCommand extends Command {
       color: kPlayer.paused ? 0xff9500 : 0x1db954,
       title: kPlayer.paused ? messages.embeds.queue.paused : messages.embeds.queue.nowPlaying,
       description: kPlayer.queue.current
-        ? `**${kPlayer.queue.current.author} - ${kPlayer.queue.current.title}**`
+        ? `**${kPlayer.queue.current.author} - ${getTrackTitle(kPlayer.queue.current)}**`
         : messages.error.nothingPlaying,
       fields: upcomingTracks.map((track, i) => ({
-        name: `${startIndex + i + 1}. ${track.title}`,
+        name: `${startIndex + i + 1}. ${getTrackTitle(track)}`,
         value: track.author ?? messages.player.unknownArtist,
         inline: false,
       })),
