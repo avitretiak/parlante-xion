@@ -23,6 +23,17 @@ const RECOVERY_RESET_THRESHOLD = 2;
 const STUCK_RECOVERY_RESET_THRESHOLD = 7;
 const RECOVERY_LOCK_MS = 5_000;
 
+// Node recovery: after NodeLink restarts (resumed=false), Shoukaku's
+// resumeByLibrary PATCHes player state back but it may silently fail.
+// The watchdog verifies playback actually started within this window.
+const NODE_RECOVERY_VERIFY_DELAY_MS = 15_000;
+const NODE_RECOVERY_REPLAY_REWIND_MS = 2_000;
+const NODE_RECOVERY_MAX_REPLAY_ATTEMPTS = 3;
+const NODE_RECOVERY_REPLAY_INTERVAL_MS = 5_000;
+const PLAYBACK_STALL_THRESHOLD_MS = 20_000;
+const PLAYBACK_STALL_RECOVERY_COOLDOWN_MS = 30_000;
+const PLAYBACK_STALL_WATCHDOG_INTERVAL_MS = 5_000;
+
 type RecoveryState = {
   consecutiveFailures: number;
   lastFailureAt: number;
@@ -56,6 +67,19 @@ type RecoveryContext = {
   reason?: string;
   cause?: string;
   severity?: string;
+};
+
+type NodeRecoveryEntry = {
+  snapshot: ResumeSnapshot;
+  watchdogTimer: NodeJS.Timeout;
+  replayAttempts: number;
+  baselinePosition: number;
+};
+
+type PlaybackProgressEntry = {
+  lastPosition: number;
+  lastProgressAt: number;
+  lastRecoveryAt: number;
 };
 
 const isTransientVoiceException = (context?: RecoveryContext): boolean => {
@@ -192,6 +216,8 @@ export const buildNodeConfig = (): NodeOption => {
 export function initKazagumo(client: Client): Kazagumo {
   const typedClient = client as unknown as UsingClient;
   const recoveryStates = new Map<string, RecoveryState>();
+  const nodeRecoveries = new Map<string, NodeRecoveryEntry>();
+  const playbackProgress = new Map<string, PlaybackProgressEntry>();
 
   const clearRecoveryState = (guildId: string): void => {
     recoveryStates.delete(guildId);
@@ -240,6 +266,108 @@ export function initKazagumo(client: Client): Kazagumo {
     const jitter = Math.floor(Math.random() * 1000);
     return cappedDelay + jitter;
   };
+
+  const clearNodeRecovery = (guildId: string): void => {
+    const entry = nodeRecoveries.get(guildId);
+    if (!entry) return;
+    clearTimeout(entry.watchdogTimer);
+    nodeRecoveries.delete(guildId);
+  };
+
+  const clearPlaybackProgress = (guildId: string): void => {
+    playbackProgress.delete(guildId);
+  };
+
+  const startNodeRecoveryWatchdog = (guildId: string, snapshot: ResumeSnapshot): void => {
+    clearNodeRecovery(guildId);
+
+    const timer = setTimeout(() => {
+      void verifyAndReplayIfNeeded(guildId);
+    }, NODE_RECOVERY_VERIFY_DELAY_MS);
+
+    nodeRecoveries.set(guildId, {
+      snapshot,
+      watchdogTimer: timer,
+      replayAttempts: 0,
+      baselinePosition: snapshot.position,
+    });
+  };
+
+  async function verifyAndReplayIfNeeded(guildId: string): Promise<void> {
+    const entry = nodeRecoveries.get(guildId);
+    if (!entry) return;
+
+    const kPlayer = kazagumo.players.get(guildId);
+    if (!kPlayer) {
+      debug(`[${guildId}] Node recovery watchdog: player gone, clearing`);
+      nodeRecoveries.delete(guildId);
+      return;
+    }
+
+    const hasProgress = kPlayer.position > 0 && kPlayer.position > entry.baselinePosition;
+    if (kPlayer.playing && !kPlayer.paused && hasProgress) {
+      debug(`[${guildId}] Node recovery watchdog: player is playing, recovery succeeded`);
+      nodeRecoveries.delete(guildId);
+      return;
+    }
+
+    if (kPlayer.state === PlayerState.DESTROYING || kPlayer.state === PlayerState.DESTROYED) {
+      debug(`[${guildId}] Node recovery watchdog: player destroying, clearing`);
+      nodeRecoveries.delete(guildId);
+      return;
+    }
+
+    entry.replayAttempts += 1;
+    if (entry.replayAttempts > NODE_RECOVERY_MAX_REPLAY_ATTEMPTS) {
+      warn(
+        `[${guildId}] Node recovery: exhausted ${NODE_RECOVERY_MAX_REPLAY_ATTEMPTS} replay attempts, giving up`,
+      );
+      nodeRecoveries.delete(guildId);
+      return;
+    }
+
+    const current = kPlayer.queue.current;
+    if (!current) {
+      debug(`[${guildId}] Node recovery watchdog: no current track, clearing`);
+      nodeRecoveries.delete(guildId);
+      return;
+    }
+
+    const currentTrackId =
+      (current as { identifier?: string }).identifier ??
+      (current as { info?: { identifier?: string } }).info?.identifier ??
+      (current as { track?: string }).track ??
+      '';
+
+    if (currentTrackId !== entry.snapshot.trackId) {
+      debug(`[${guildId}] Node recovery watchdog: track changed, clearing`);
+      nodeRecoveries.delete(guildId);
+      return;
+    }
+
+    const rewindPosition = Math.max(0, entry.snapshot.position - NODE_RECOVERY_REPLAY_REWIND_MS);
+    warn(
+      `[${guildId}] Node recovery: resumeByLibrary didn't restore playback, replaying from ${rewindPosition}ms (attempt ${entry.replayAttempts}/${NODE_RECOVERY_MAX_REPLAY_ATTEMPTS})`,
+    );
+
+    try {
+      await kPlayer.shoukaku.resume({
+        position: rewindPosition,
+        paused: entry.snapshot.paused,
+      });
+
+      entry.baselinePosition = Math.max(0, kPlayer.position, rewindPosition);
+
+      entry.watchdogTimer = setTimeout(() => {
+        void verifyAndReplayIfNeeded(guildId);
+      }, NODE_RECOVERY_REPLAY_INTERVAL_MS);
+    } catch (err) {
+      warn(`[${guildId}] Node recovery: replay attempt failed`, err);
+      entry.watchdogTimer = setTimeout(() => {
+        void verifyAndReplayIfNeeded(guildId);
+      }, NODE_RECOVERY_REPLAY_INTERVAL_MS);
+    }
+  }
 
   const recoverFromPlaybackFailure = async (
     player: KazagumoPlayer,
@@ -323,13 +451,13 @@ export function initKazagumo(client: Client): Kazagumo {
     // seconds after the WS drops. When Shoukaku reconnects within that window the
     // track continues without any action on our side.
     resume: true,
-    resumeTimeout: 60,
+    resumeTimeout: 300,
     // Client-side fallback: if the node was fully restarted (json.resumed === false)
     // Shoukaku will call player.resume() for every known player so we get playerStart.
     resumeByLibrary: true,
-    reconnectTries: 3,
-    // seconds (Shoukaku multiplies by 1000 internally — 5000 here = 83 min, wrong)
-    reconnectInterval: 5,
+    // 6 × 10s = 60s reconnect budget; aligned with expected ISP flaps (< 1 min).
+    reconnectTries: 6,
+    reconnectInterval: 10,
   };
 
   const kazagumo = new Kazagumo(
@@ -343,8 +471,92 @@ export function initKazagumo(client: Client): Kazagumo {
     options,
   );
 
-  kazagumo.shoukaku.on('ready', (name) => {
+  setInterval(() => {
+    const now = Date.now();
+
+    for (const [guildId, kPlayer] of kazagumo.players) {
+      if (kPlayer.state === PlayerState.DESTROYING || kPlayer.state === PlayerState.DESTROYED) {
+        continue;
+      }
+
+      const current = kPlayer.queue.current;
+      if (!current || kPlayer.paused || !kPlayer.playing || !kPlayer.voiceId) {
+        continue;
+      }
+
+      const parlantePlayer = playersManager.get(guildId);
+      if (!parlantePlayer) continue;
+
+      const position = kPlayer.position;
+      const progress = playbackProgress.get(guildId);
+      if (!progress) {
+        playbackProgress.set(guildId, {
+          lastPosition: position,
+          lastProgressAt: now,
+          lastRecoveryAt: 0,
+        });
+        continue;
+      }
+
+      if (position > progress.lastPosition) {
+        progress.lastPosition = position;
+        progress.lastProgressAt = now;
+        continue;
+      }
+
+      const stalledForMs = now - progress.lastProgressAt;
+      const cooldownMs = now - progress.lastRecoveryAt;
+      if (
+        stalledForMs < PLAYBACK_STALL_THRESHOLD_MS ||
+        cooldownMs < PLAYBACK_STALL_RECOVERY_COOLDOWN_MS
+      ) {
+        continue;
+      }
+
+      const snapshot = buildResumeSnapshot(kPlayer, parlantePlayer);
+      if (!snapshot) continue;
+
+      progress.lastRecoveryAt = now;
+      progress.lastProgressAt = now;
+      warn(
+        `[${guildId}] Playback watchdog: stalled at ${position}ms for ${stalledForMs}ms — forcing resume replay`,
+      );
+
+      const nonce = parlantePlayer.scheduleResumeTimer(getResumeDelayMs(1), () => {
+        void attemptResume(guildId, nonce, snapshot, 1);
+      });
+    }
+  }, PLAYBACK_STALL_WATCHDOG_INTERVAL_MS);
+
+  kazagumo.shoukaku.on('ready', (name, resumed, resumedByLibrary) => {
     info(messages.debug.nodeLinkConnected(name));
+
+    if (resumed) {
+      debug(`[Shoukaku] Node ${name} resumed server-side session — no recovery needed`);
+      return;
+    }
+
+    debug(
+      `[Shoukaku] Node ${name} connected with NEW session (resumed=false, resumedByLibrary=${resumedByLibrary})`,
+    );
+
+    if (!resumedByLibrary) return;
+
+    for (const [guildId, kPlayer] of kazagumo.players) {
+      const parlantePlayer = playersManager.get(guildId);
+      if (!parlantePlayer) continue;
+
+      const snapshot = buildResumeSnapshot(kPlayer, parlantePlayer);
+      if (!snapshot) {
+        debug(`[${guildId}] Node recovery: no snapshot available, skipping watchdog`);
+        continue;
+      }
+
+      info(
+        `[${guildId}] Node recovery: starting watchdog (track=${snapshot.trackId}, position=${snapshot.position}ms)`,
+      );
+      startNodeRecoveryWatchdog(guildId, snapshot);
+    }
   });
   kazagumo.shoukaku.on('error', (name, err) => {
     logError(messages.debug.nodeLinkError(name), err);
@@ -357,15 +569,45 @@ export function initKazagumo(client: Client): Kazagumo {
   });
 
   kazagumo.shoukaku.on('raw', (_name, json) => {
-    const event = json as { op?: string; type?: string; guildId?: string; mixId?: string };
-    if (event.op !== 'event' || event.type !== 'MixEndedEvent') return;
-    if (!event.guildId || !event.mixId) return;
-    playersManager.get(event.guildId)?.onMixEnded(event.mixId);
+    const event = json as {
+      op?: string;
+      type?: string;
+      guildId?: string;
+      mixId?: string;
+      thresholdMs?: number;
+      reason?: string;
+    };
+    if (event.op !== 'event') return;
+
+    if (event.type === 'MixEndedEvent') {
+      if (!event.guildId || !event.mixId) return;
+      playersManager.get(event.guildId)?.onMixEnded(event.mixId);
+      return;
+    }
+
+    if (event.type !== 'TrackStuckEvent' || !event.guildId) return;
+
+    warn(
+      `[${event.guildId}] raw TrackStuckEvent received (thresholdMs=${event.thresholdMs ?? 'n/a'}, reason=${event.reason ?? 'unknown'})`,
+    );
+
+    const kPlayer = kazagumo.players.get(event.guildId);
+    const parlantePlayer = playersManager.get(event.guildId);
+    if (!kPlayer || !parlantePlayer) return;
+
+    const snapshot = buildResumeSnapshot(kPlayer, parlantePlayer);
+    if (!snapshot) return;
+
+    const guildId = event.guildId;
+    const nonce = parlantePlayer.scheduleResumeTimer(getResumeDelayMs(1), () => {
+      void attemptResume(guildId, nonce, snapshot, 1);
+    });
   });
 
   kazagumo.on('playerStart', async (player, track) => {
     try {
       clearRecoveryState(player.guildId);
+      clearNodeRecovery(player.guildId);
       debug(`[${player.guildId}] playerStart diagnostics`, {
         playerState: player.state,
         playing: player.playing,
@@ -375,6 +617,7 @@ export function initKazagumo(client: Client): Kazagumo {
       });
       const parlantePlayer = playersManager.get(player.guildId);
       if (!parlantePlayer) return;
+      clearPlaybackProgress(player.guildId);
       parlantePlayer.cancelIdleTimer();
       // Scope position tracking to this track and cancel any in-flight resume
       // from a previous close event — a new track start is authoritative.
@@ -410,10 +653,29 @@ export function initKazagumo(client: Client): Kazagumo {
       (current as { info?: { identifier?: string } }).info?.identifier ??
       (current as { track?: string }).track ??
       '';
-    parlantePlayer.recordPosition(trackId, data.state.position);
+    const position = data.state.position;
+    parlantePlayer.recordPosition(trackId, position);
+
+    const now = Date.now();
+    const existing = playbackProgress.get(player.guildId);
+    if (!existing) {
+      playbackProgress.set(player.guildId, {
+        lastPosition: position,
+        lastProgressAt: now,
+        lastRecoveryAt: 0,
+      });
+      return;
+    }
+
+    if (position > existing.lastPosition) {
+      existing.lastPosition = position;
+      existing.lastProgressAt = now;
+    }
   });
   kazagumo.on('playerEmpty', async (player) => {
     try {
+      clearNodeRecovery(player.guildId);
+      clearPlaybackProgress(player.guildId);
       const parlantePlayer = playersManager.get(player.guildId);
       if (!parlantePlayer) return;
       // Queue is empty — any pending reconnect resume would replay a track that
@@ -432,7 +694,17 @@ export function initKazagumo(client: Client): Kazagumo {
   });
   kazagumo.on('playerDestroy', async (player) => {
     try {
+      const hadNodeRecovery = nodeRecoveries.has(player.guildId);
       clearRecoveryState(player.guildId);
+      clearNodeRecovery(player.guildId);
+      clearPlaybackProgress(player.guildId);
+
+      if (hadNodeRecovery) {
+        warn(
+          `[${player.guildId}] playerDestroy during node recovery — Shoukaku destroyed player (likely missing voice data after node restart)`,
+        );
+      }
+
       const parlantePlayer = playersManager.get(player.guildId);
       if (!parlantePlayer) return;
 
@@ -453,6 +725,7 @@ export function initKazagumo(client: Client): Kazagumo {
       if (!parlantePlayer) return;
 
       parlantePlayer.onVoiceConnectionClosed();
+      clearPlaybackProgress(player.guildId);
 
       const snapshot = buildResumeSnapshot(player, parlantePlayer);
       if (!snapshot) {
@@ -592,6 +865,14 @@ export function initKazagumo(client: Client): Kazagumo {
     }
   }
 
+  kazagumo.on('playerResumed', (player) => {
+    debug(`[${player.guildId}] playerResumed — Shoukaku resume() succeeded`);
+    clearRecoveryState(player.guildId);
+    // Don't clear node recovery here — the watchdog verifies actual playback,
+    // not just the REST call succeeding. The playing → idle bug means the PATCH
+    // can succeed without audio actually flowing.
+  });
+
   kazagumo.on('playerException', (player, data) => {
     try {
       const details = getPlayerExceptionDiagnostics(data);
@@ -648,10 +929,15 @@ export function initKazagumo(client: Client): Kazagumo {
       debug(`[${player.guildId}] Error in playerException handler`, err);
     }
   });
-  kazagumo.on('playerStuck', (player) => {
+  kazagumo.on('playerStuck', (player, data) => {
     try {
-      warn(`[${player.guildId}] Player stuck`);
+      const details = data as { thresholdMs?: number; reason?: string } | undefined;
+      warn(
+        `[${player.guildId}] Player stuck (thresholdMs=${details?.thresholdMs ?? 'n/a'}, reason=${details?.reason ?? 'unknown'})`,
+      );
       debug(`[${player.guildId}] playerStuck diagnostics`, {
+        thresholdMs: details?.thresholdMs,
+        reason: details?.reason,
         playerState: player.state,
         playing: player.playing,
         paused: player.paused,
@@ -671,6 +957,7 @@ export function initKazagumo(client: Client): Kazagumo {
 
       void recoverFromPlaybackFailure(player, {
         trigger: 'playerStuck',
+        reason: details?.reason,
       });
     } catch (err) {
       debug(`[${player.guildId}] Error in playerStuck handler`, err);
