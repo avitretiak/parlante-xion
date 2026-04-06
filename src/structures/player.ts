@@ -4,17 +4,28 @@ import type { ActionRow, Button } from 'seyfert';
 import messages from '#parlante/utils/constants/messages';
 import { buildNowPlayingEmbed } from '#parlante/utils/player/build-now-playing-embed';
 import { debug, warn } from '#parlante/utils/system/logger';
-import { addMixLayer as mixerAdd, deleteAllMixLayers } from '#parlante/services/mixer';
+import {
+  addMixLayer as mixerAdd,
+  deleteAllMixLayers,
+  listMixLayers,
+} from '#parlante/services/mixer';
 
 const EMBED_DEBOUNCE_MS = 5000;
 const MESSAGE_REPLACEMENT_THRESHOLD_MS = 45 * 60 * 1000; // 45 minutes
 const EDIT_FAILURE_COOLDOWN_MS = 15_000; // 15 seconds
 const AUTO_DELETE_DELAY_MS = 10_000; // 10 seconds
-const MIX_LAYER_SAFETY_TIMEOUT_MS = 120_000; // 2 minutes — fallback if MixEndedEvent never arrives
+const MIX_LAYER_SAFETY_TIMEOUT_MS = 30_000;
+const MIX_LAYER_POLL_INTERVAL_MS = 2_000;
+const MIX_LAYER_POLL_MISS_THRESHOLD = 3;
 
 type QueuedMixLayer = {
   encodedTrack: string;
   volume: number;
+};
+
+type ActiveMixHandle = {
+  timeout: NodeJS.Timeout;
+  poller: NodeJS.Timeout | null;
 };
 
 type Embed = {
@@ -48,7 +59,7 @@ export class ParlantePlayer {
   private refreshInterval: NodeJS.Timeout | null = null;
   private lastMessageSentAt = 0;
   private lastEditFailureTime = 0;
-  private readonly activeMixes = new Map<string, NodeJS.Timeout>();
+  private readonly activeMixes = new Map<string, ActiveMixHandle>();
   private readonly ttsQueue: QueuedMixLayer[] = [];
   private ttsPlaying = false;
 
@@ -257,11 +268,16 @@ export class ParlantePlayer {
   }
 
   onMixEnded(mixId: string): void {
-    const timeout = this.activeMixes.get(mixId);
-    if (!timeout) return;
-    clearTimeout(timeout);
-    this.activeMixes.delete(mixId);
-    debug(`[${this.guildId}] Mix layer ended: ${mixId}`);
+    this.finishMixLayer(mixId, 'event');
+  }
+
+  onVoiceConnectionClosed(): void {
+    if (!this.ttsPlaying && this.activeMixes.size === 0) return;
+
+    warn(
+      `[${this.guildId}] Voice closed while TTS mix was active; unlocking queue and dropping in-flight mix`,
+    );
+    this.clearMixTimeouts();
     this.ttsPlaying = false;
     this.playNextTts();
   }
@@ -270,8 +286,11 @@ export class ParlantePlayer {
     this.ttsQueue.length = 0;
     this.ttsPlaying = false;
 
-    for (const timeout of this.activeMixes.values()) {
-      clearTimeout(timeout);
+    for (const handle of this.activeMixes.values()) {
+      clearTimeout(handle.timeout);
+      if (handle.poller) {
+        clearInterval(handle.poller);
+      }
     }
     this.activeMixes.clear();
 
@@ -324,12 +343,35 @@ export class ParlantePlayer {
 
         const mixId = layer.id;
         const timeout = setTimeout(() => {
-          this.activeMixes.delete(mixId);
-          debug(`[${this.guildId}] Mix layer ${mixId} expired by safety timeout`);
-          this.ttsPlaying = false;
-          this.playNextTts();
+          this.finishMixLayer(mixId, 'safety-timeout');
         }, MIX_LAYER_SAFETY_TIMEOUT_MS);
-        this.activeMixes.set(mixId, timeout);
+
+        let pollInFlight = false;
+        let consecutiveMisses = 0;
+        const poller = setInterval(() => {
+          if (pollInFlight) return;
+
+          pollInFlight = true;
+          void listMixLayers(sessionId, this.guildId)
+            .then((layers) => {
+              if (!this.activeMixes.has(mixId)) return;
+
+              const stillPresent = layers.some((layer) => layer.id === mixId);
+              if (stillPresent) {
+                consecutiveMisses = 0;
+                return;
+              }
+
+              consecutiveMisses += 1;
+              if (consecutiveMisses < MIX_LAYER_POLL_MISS_THRESHOLD) return;
+              this.finishMixLayer(mixId, 'poll-miss');
+            })
+            .finally(() => {
+              pollInFlight = false;
+            });
+        }, MIX_LAYER_POLL_INTERVAL_MS);
+
+        this.activeMixes.set(mixId, { timeout, poller });
       })
       .catch((err) => {
         warn(`[${this.guildId}] Mix layer dispatch error`, err);
@@ -347,10 +389,28 @@ export class ParlantePlayer {
   }
 
   private clearMixTimeouts(): void {
-    for (const timeout of this.activeMixes.values()) {
-      clearTimeout(timeout);
+    for (const handle of this.activeMixes.values()) {
+      clearTimeout(handle.timeout);
+      if (handle.poller) {
+        clearInterval(handle.poller);
+      }
     }
     this.activeMixes.clear();
+  }
+
+  private finishMixLayer(mixId: string, reason: 'event' | 'safety-timeout' | 'poll-miss'): void {
+    const handle = this.activeMixes.get(mixId);
+    if (!handle) return;
+
+    clearTimeout(handle.timeout);
+    if (handle.poller) {
+      clearInterval(handle.poller);
+    }
+    this.activeMixes.delete(mixId);
+
+    debug(`[${this.guildId}] Mix layer ${mixId} finished (${reason})`);
+    this.ttsPlaying = false;
+    this.playNextTts();
   }
 
   private async performNowPlayingUpdate(client: UsingClient, channelId: string): Promise<void> {

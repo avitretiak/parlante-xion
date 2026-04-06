@@ -452,6 +452,8 @@ export function initKazagumo(client: Client): Kazagumo {
       const parlantePlayer = playersManager.get(player.guildId);
       if (!parlantePlayer) return;
 
+      parlantePlayer.onVoiceConnectionClosed();
+
       const snapshot = buildResumeSnapshot(player, parlantePlayer);
       if (!snapshot) {
         debug(`[${player.guildId}] playerClosed — no snapshot available, skipping resume`);
