@@ -57,6 +57,27 @@ const getMessage = (key?: string, ...args: unknown[]): string => {
 
 const cleanMessage = (message: string): string => message.replace(/\[bun\] Warning: /g, '');
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value && typeof value === 'object' && !Array.isArray(value));
+
+const serializeUnknown = (value: unknown): Record<string, unknown> => {
+  if (value instanceof Error) {
+    const cause = value.cause;
+    return {
+      name: value.name,
+      message: value.message,
+      stack: value.stack,
+      ...(cause === undefined ? {} : { cause }),
+    };
+  }
+
+  if (isPlainObject(value)) {
+    return value;
+  }
+
+  return { value };
+};
+
 // Create a LogRecord for warnings
 const createWarningRecord = (message: string): LogRecord => ({
   category: [],
@@ -148,18 +169,29 @@ export const info = (key?: string, ...args: unknown[]): void => {
 };
 
 export const warn = (key?: string, ...args: unknown[]): void => {
+  if (args.length === 1 && isPlainObject(args[0])) {
+    logger.warn(getMessage(key), serializeUnknown(args[0]));
+    return;
+  }
+
   logger.warn(getMessage(key, ...args));
 };
 
 export const error = (key?: string, ...args: unknown[]): void => {
-  if (args[0] instanceof Error) {
-    const err = args[0];
-    logger.error(key || err.message, {
-      err: { name: err.name, message: err.message, stack: err.stack },
-    });
-  } else {
-    logger.error(getMessage(key, ...args));
+  if (args.length === 1) {
+    const [value] = args;
+    if (value instanceof Error) {
+      logger.error(key || value.message, serializeUnknown(value));
+      return;
+    }
+
+    if (isPlainObject(value)) {
+      logger.error(getMessage(key), serializeUnknown(value));
+      return;
+    }
   }
+
+  logger.error(getMessage(key, ...args));
 };
 
 export const log = info;

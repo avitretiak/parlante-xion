@@ -12,6 +12,27 @@ import { voiceGuard } from '#parlante/middlewares/voice-guard';
 import { commandQueue } from '#parlante/middlewares/command-queue';
 import messages from '#parlante/utils/constants/messages';
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value && typeof value === 'object' && !Array.isArray(value));
+
+const serializeUnknown = (value: unknown): Record<string, unknown> => {
+  if (value instanceof Error) {
+    const cause = value.cause;
+    return {
+      name: value.name,
+      message: value.message,
+      stack: value.stack,
+      ...(cause === undefined ? {} : { cause }),
+    };
+  }
+
+  if (isPlainObject(value)) {
+    return value;
+  }
+
+  return { value };
+};
+
 // Route Seyfert's built-in Logger through LogTape
 Logger.customize((self, level, args) => {
   const msg = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
@@ -90,14 +111,9 @@ client.events.onFail = (event, err) => {
 };
 
 process.on('unhandledRejection', (reason) => {
-  if (reason instanceof Error) {
-    error('Unhandled promise rejection (caught to prevent crash)', reason);
-    return;
-  }
-
   error('Unhandled promise rejection (caught to prevent crash)', {
     reasonType: typeof reason,
-    reason,
+    reason: serializeUnknown(reason),
   });
 });
 
