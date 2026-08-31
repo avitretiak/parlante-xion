@@ -1,0 +1,69 @@
+services:
+  nodelink:
+    container_name: nodelink
+    image: performanc/nodelink:3.8.0@sha256:3fc8abbc2d01a7787c6141b948958929b55c3a4e1422eea278e4f7a4e08b7ab1
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      - NODELINK_SERVER_PASSWORD=${NODELINK_PASSWORD}
+      - NODELINK_SOURCES_SPOTIFY_CLIENTID=${SPOTIFY_CLIENT_ID}
+      - NODELINK_SOURCES_SPOTIFY_CLIENTSECRET=${SPOTIFY_CLIENT_SECRET}
+      - NODELINK_SOURCES_YOUTUBE_CIPHER_URL=http://youtube-cipher:8081
+      - NODELINK_SOURCES_YOUTUBE_CIPHER_TOKEN=${YOUTUBE_CIPHER_TOKEN}
+    volumes:
+      - nodelink-data:/data
+    networks:
+      - parlante-network
+    depends_on:
+      youtube-cipher:
+        condition: service_started
+    healthcheck:
+      test:
+        ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:3000/version']
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  youtube-cipher:
+    container_name: youtube-cipher
+    image: ghcr.io/kikkia/yt-cipher@sha256:76e485a7f88363f5f67db8eeb1c7a7a6d5706c669ed0b01652e546405b0f2da2
+    restart: unless-stopped
+    networks:
+      - parlante-network
+    environment:
+      - PORT=8081
+      - HOST=0.0.0.0
+      - API_TOKEN=${YOUTUBE_CIPHER_TOKEN}
+
+  parlante-xion:
+    container_name: parlante-xion
+    image: ghcr.io/avitretiak/parlante-xion:latest
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - DATA_DIR=/data
+      - NODELINK_URL=http://nodelink:3000
+      - NODELINK_PASSWORD=${NODELINK_PASSWORD}
+    volumes:
+      - parlante-xion-data:/data
+    networks:
+      - parlante-network
+    depends_on:
+      nodelink:
+        condition: service_started
+    healthcheck:
+      test: ['CMD', 'pgrep', '-f', 'bun run src/index.ts']
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+networks:
+  parlante-network:
+    driver: bridge
+
+volumes:
+  parlante-xion-data:
+  nodelink-data:

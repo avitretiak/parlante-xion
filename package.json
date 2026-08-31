@@ -1,0 +1,49 @@
+{
+  "name": "parlante-xion",
+  "version": "1.0.0",
+  "description": "🎧 a self-hosted Discord music bot that doesn't suck, using NodeLink as audio server",
+  "license": "MIT",
+  "author": "Avi Tretiak <avi@babi.uy>",
+  "repository": "git@github.com:avitretiak/parlante-xion.git",
+  "imports": {
+    "#parlante/config": "./src/services/config.ts",
+    "#parlante/db": "./src/db/index.ts",
+    "#parlante/db/schema": "./src/db/schema.ts",
+    "#parlante/*": "./src/*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "dev": "bun run src/index.ts",
+    "migrate-and-start": "bun run src/index.ts migrate-and-start",
+    "lint": "bunx oxlint .",
+    "lint:fix": "bunx oxlint --fix .",
+    "format": "bunx oxfmt .",
+    "format:check": "bunx oxfmt --check .",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "@logtape/logtape": "^2.3.0",
+    "@logtape/pretty": "^2.3.0",
+    "drizzle-orm": "^0.45.2",
+    "kazagumo": "^3.4.3",
+    "seyfert": "^5.0.0",
+    "shoukaku": "^4.3.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "drizzle-kit": "^0.31.10",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
+    "oxfmt": "^0.62.0",
+    "oxlint": "^1.77.0",
+    "typescript": "^7.0.2"
+  },
+  "lint-staged": {
+    "*.{ts,js,mjs,json}": [
+      "bunx oxlint --fix",
+      "bunx oxfmt"
+    ]
+  },
+  "target": "bun"
+}

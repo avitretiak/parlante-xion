@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1772693970635,
+      "tag": "0000_broad_daredevil",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1785400005487,
+      "tag": "0001_clever_martin_li",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785805688869,
+      "tag": "0002_married_james_howlett",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1785808121602,
+      "tag": "0003_flat_tony_stark",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1785817880061,
+      "tag": "0004_far_lionheart",
+      "breakpoints": true
+    }
+  ]
+}

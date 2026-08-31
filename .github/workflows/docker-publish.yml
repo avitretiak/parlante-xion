@@ -1,0 +1,162 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOCKER_REGISTRY: ghcr.io
+
+jobs:
+  test:
+    name: Test / Lint / Typecheck
+    runs-on: ubuntu-latest
+    env:
+      DATA_DIR: /tmp/parlante-data
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Lint
+        run: bun run lint
+      - name: Format check
+        run: bun run format:check
+      - name: Test
+        run: bun test
+
+  build:
+    name: Build & Push
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: Private Github
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta
+        with:
+          images: ${{ env.DOCKER_REGISTRY }}/${{ github.repository_owner }}/parlante-xion
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}
+            COMMIT_HASH=${{ github.sha }}
+            VERSION=${{ github.ref_name }}
+            GITHUB_REPOSITORY=${{ github.repository }}
+  deploy-production:
+    name: Deploy production
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      KOMODO_URL: ${{ secrets.KOMODO_URL }}
+      KOMODO_STACK: parlante-xion
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      KOMODO_DEPLOY_API_KEY: ${{ secrets.KOMODO_DEPLOY_API_KEY }}
+      KOMODO_DEPLOY_API_SECRET: ${{ secrets.KOMODO_DEPLOY_API_SECRET }}
+    steps:
+      - name: Pull and deploy Parlante Xion
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          api_request() {
+            local endpoint="$1" payload="$2" response_file http_status
+            response_file="$(mktemp)"
+            if ! http_status="$(curl --silent --show-error --output "$response_file" --write-out '%{http_code}' --request POST "$KOMODO_URL$endpoint" --header 'Content-Type: application/json' --header "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" --header "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" --header "X-Api-Key: $KOMODO_DEPLOY_API_KEY" --header "X-Api-Secret: $KOMODO_DEPLOY_API_SECRET" --data "$payload")"; then
+              echo "::error::Komodo request to $endpoint could not be completed"
+              rm -f "$response_file"
+              return 1
+            fi
+            if [[ ! "$http_status" =~ ^2[0-9][0-9]$ ]]; then
+              echo "::error::Komodo request to $endpoint returned HTTP $http_status"
+              rm -f "$response_file"
+              return 1
+            fi
+            if ! jq -e . "$response_file" >/dev/null 2>&1; then
+              echo "::error::Komodo request to $endpoint returned a non-JSON response"
+              rm -f "$response_file"
+              return 1
+            fi
+            cat "$response_file"
+            rm -f "$response_file"
+          }
+
+          sanitize_failed_logs() {
+            jq -r '.logs[]? | select(.success == false) | "[\(.stage)]\n\(.stdout)\n\(.stderr)"' | sed -E -e 's/(ghp_|github_pat_|gho_|ghs_|ghu_|glpat-)[[:alnum:]_=-]+/[REDACTED]/g' -e 's/[[:alnum:]_+=\/-]{32,}/[REDACTED]/g'
+          }
+
+          execute_update() {
+            local operation="$1" stack="$2" response update_id
+            response="$(api_request /execute "$(jq -nc --arg type "$operation" --arg stack "$stack" '{type: $type, params: {stack: $stack}}')")"
+            update_id="$(jq -r '.id // ._id."$oid" // empty' <<<"$response")"
+            if [[ -z "$update_id" ]]; then
+              echo "::error::$operation did not return an update ID"
+              return 1
+            fi
+            printf '%s\n' "$update_id"
+          }
+
+          wait_for_update() {
+            local update_id="$1" update status success
+            while true; do
+              update="$(api_request /read "$(jq -nc --arg id "$update_id" '{type: "GetUpdate", params: {id: $id}}')")"
+              status="$(jq -r '.status // empty' <<<"$update")"
+              case "$status" in
+                Queued|InProgress) sleep 5 ;;
+                Complete)
+                  success="$(jq -r '.success // false' <<<"$update")"
+                  if [[ "$success" == "true" ]]; then return 0; fi
+                  echo "::error::Komodo update $update_id completed unsuccessfully"
+                  sanitize_failed_logs <<<"$update"
+                  return 1
+                  ;;
+                *)
+                  echo "::error::Komodo update $update_id ended with unexpected status: ${status:-missing}"
+                  sanitize_failed_logs <<<"$update"
+                  return 1
+                  ;;
+              esac
+            done
+          }
+
+          pull_update_id="$(execute_update PullStack "$KOMODO_STACK")"
+          wait_for_update "$pull_update_id"
+          deploy_update_id="$(execute_update DeployStack "$KOMODO_STACK")"
+          wait_for_update "$deploy_update_id"

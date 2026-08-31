@@ -1,0 +1,12 @@
+node_modules/
+data/
+dist/
+coverage/
+*.log
+*.tsbuildinfo
+.env
+.env.test
+.DS_Store
+.idea/
+.vscode/
+.slim/deepwork/

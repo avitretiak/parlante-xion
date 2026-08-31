@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    /* Language and Environment */
+    "target": "ES2024",
+    "lib": ["ESNext", "WebWorker"],
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+
+    /* Modules */
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["bun", "node"],
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+
+    /* Type Checking */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    /* Completeness */
+    "skipLibCheck": true,
+    "noErrorTruncation": true,
+
+    /* Path Mapping */
+    "paths": {
+      "#parlante/config": ["./src/services/config.ts"],
+      "#parlante/db": ["./src/db/index.ts"],
+      "#parlante/db/schema": ["./src/db/schema.ts"],
+      "#parlante/*": ["./src/*"]
+    }
+  },
+
+  /* Project Structure */
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
+}
