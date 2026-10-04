@@ -144,10 +144,10 @@ Setting defaults: playlistLimit=50, secondsToWaitAfterQueueEmpties=30, leaveIfNo
 
 ### Docker
 
-2-stage Dockerfile (deps + runtime) on `oven/bun:canary-alpine@sha256:6692655a2f4f308f370f59273a48b7d77bd840cc2635c9721ba589ac6133d24d`. Runs as non-root `parlante` user, `CMD ["bun", "run", "src/index.ts", "migrate-and-start"]`. HEALTHCHECK via `pgrep` every 30s. Three services in compose:
+2-stage Dockerfile (deps + runtime) on `oven/bun:1.4.2-alpine@sha256:d888c0ae6c86d7866ff10c5aafdd9077b36aee6455b33dd270fb93c0dd5cef6f`. Runs as non-root `parlante` user, `CMD ["bun", "run", "src/index.ts", "migrate-and-start"]`. HEALTHCHECK via `pgrep` every 30s. Three services in compose:
 
-- `nodelink` — `performanc/nodelink:3.8.0@sha256:3fc8abbc2d01a7787c6141b948958929b55c3a4e1422eea278e4f7a4e08b7ab1`
-- `youtube-cipher` — `ghcr.io/kikkia/yt-cipher@sha256:76e485a7f88363f5f67db8eeb1c7a7a6d5706c669ed0b01652e546405b0f2da2`
+- `nodelink` — `performanc/nodelink:3.9.0@sha256:e15a9ae334f36432ed7f544521644bc99820eaba77ac4e592d939169b7a0bfa8`
+- `youtube-cipher` — `ghcr.io/kikkia/yt-cipher:master@sha256:4c5ec381ff57336cfc24822d2b526a5ad7cd0171f61065a1bbc87bb736842449`
 
 ### CI
 

@@ -1,7 +1,7 @@
 services:
   nodelink:
     container_name: nodelink
-    image: performanc/nodelink:3.8.0@sha256:3fc8abbc2d01a7787c6141b948958929b55c3a4e1422eea278e4f7a4e08b7ab1
+    image: performanc/nodelink:3.9.0@sha256:e15a9ae334f36432ed7f544521644bc99820eaba77ac4e592d939169b7a0bfa8
     pull_policy: always
     restart: unless-stopped
     environment:
@@ -27,7 +27,7 @@ services:
 
   youtube-cipher:
     container_name: youtube-cipher
-    image: ghcr.io/kikkia/yt-cipher@sha256:76e485a7f88363f5f67db8eeb1c7a7a6d5706c669ed0b01652e546405b0f2da2
+    image: ghcr.io/kikkia/yt-cipher:master@sha256:4c5ec381ff57336cfc24822d2b526a5ad7cd0171f61065a1bbc87bb736842449
     restart: unless-stopped
     networks:
       - parlante-network

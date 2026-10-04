@@ -14,7 +14,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Pin Bun 1.4.0 stable for Docker and CI
+- Update runtime/tooling dependencies and GitHub Actions; pin Bun 1.4.2, NodeLink 3.9.0, and YouTube cipher images
 
 ### Fixed
 

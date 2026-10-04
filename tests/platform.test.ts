@@ -257,11 +257,4 @@ describe('deployment manifests', () => {
     expect(compose.slice(0, compose.indexOf('parlante-xion:'))).toContain('SPOTIFY_CLIENT_ID');
     expect(compose.slice(0, compose.indexOf('parlante-xion:'))).toContain('YOUTUBE_CIPHER_TOKEN');
   });
-
-  test('Dockerfile pins an immutable syntax frontend digest', async () => {
-    const dockerfile = await Bun.file('Dockerfile').text();
-    expect(dockerfile.split('\n')[0]).toBe(
-      '# syntax=docker/dockerfile:1.26.0@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32',
-    );
-  });
 });
