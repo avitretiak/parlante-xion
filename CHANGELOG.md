@@ -21,6 +21,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Now-playing card is deleted instead of orphaned when the output channel changes mid-session
 - NodeLink-restart recovery
 - CI test environment sets a writable `DATA_DIR` for database initialization
+- Bun test file isolation prevents module mocks leaking across CI workers
 - Corrected the pinned `oven-sh/setup-bun` action revision in the CI workflow
 - Live-node rebind and null-session resume guard
 
